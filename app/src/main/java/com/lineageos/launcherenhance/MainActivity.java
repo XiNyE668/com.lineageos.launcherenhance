@@ -1,7 +1,6 @@
 package com.lineageos.launcherenhance;
 
 import android.app.Activity;
-import android.app.ActivityManager;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -38,7 +37,6 @@ import java.util.Map;
 import java.util.Set;
 
 public final class MainActivity extends Activity {
-    private static final String TARGET_LAUNCHER = "com.android.launcher3";
     private static final String RENAME_SEPARATOR = "\t";
 
     private SharedPreferences prefs;
@@ -85,7 +83,8 @@ public final class MainActivity extends Activity {
         root.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Android 16 / LineageOS 23.2 / Trebuchet\nLSPosed module · package: com.lineageos.launcherenhance");
+        subtitle.setText("Android 16 / LineageOS 23.2 / Trebuchet\n"
+                + "LSPosed module · 设置变更后自动重载 Trebuchet");
         subtitle.setTextSize(14);
         subtitle.setPadding(0, dp(6), 0, dp(12));
         root.addView(subtitle);
@@ -139,15 +138,14 @@ public final class MainActivity extends Activity {
         addSection("最近任务");
         addSwitch("在最近任务底部显示内存信息", ConfigKeys.RECENTS_MEMINFO, false);
         addSwitch("内存信息同时显示 ZRAM", ConfigKeys.RECENTS_MEMINFO_ZRAM, false);
-        addSwitch("Clear all 与 Screenshot 同一行", ConfigKeys.RECENTS_CLEAR_ALL_INLINE, false);
         addClearAllSideSpinner();
 
         addSection("应用配置");
-        Button apply = addButton("保存并重启 Trebuchet");
-        apply.setOnClickListener(v -> {
-            notifyConfigChanged();
-            restartLauncher();
-        });
+        TextView liveApply = new TextView(this);
+        liveApply.setText("设置会立即保存。Trebuchet 由 LSPosed 注入代码自行重载，不再请求 Root 权限。");
+        liveApply.setTextSize(13);
+        liveApply.setPadding(0, dp(4), 0, dp(8));
+        root.addView(liveApply, fullWidth());
 
         Button refresh = addButton("刷新 LSPosed Hook 状态");
         refresh.setOnClickListener(v -> refreshStatus());
@@ -156,7 +154,8 @@ public final class MainActivity extends Activity {
         reset.setOnClickListener(v -> confirmReset());
 
         TextView footer = new TextView(this);
-        footer.setText("原项目 Launcher3Customizer © 2023 gitofleonardo (MIT)\nAndroid 16 rewrite: XiNyE & ChatGPT");
+        footer.setText("原项目 Launcher3Customizer © 2023 gitofleonardo (MIT)\n"
+                + "Android 16 rewrite: XiNyE & ChatGPT");
         footer.setTextSize(12);
         footer.setGravity(Gravity.CENTER_HORIZONTAL);
         footer.setPadding(0, dp(24), 0, 0);
@@ -355,7 +354,8 @@ public final class MainActivity extends Activity {
         }
         new AlertDialog.Builder(this)
                 .setTitle("隐藏应用（仅当前主用户的应用抽屉）")
-                .setMultiChoiceItems(names, checked, (dialog, which, isChecked) -> checked[which] = isChecked)
+                .setMultiChoiceItems(names, checked,
+                        (dialog, which, isChecked) -> checked[which] = isChecked)
                 .setPositiveButton("保存", (dialog, which) -> {
                     hiddenPackages.clear();
                     for (int i = 0; i < apps.size(); i++) {
@@ -560,38 +560,6 @@ public final class MainActivity extends Activity {
         } catch (Throwable ignored) {}
     }
 
-    private void restartLauncher() {
-        Toast.makeText(this, "正在重启 Trebuchet…", Toast.LENGTH_SHORT).show();
-        new Thread(() -> {
-            boolean rooted = false;
-            try {
-                Process p = Runtime.getRuntime().exec(new String[]{
-                        "su", "-c", "am force-stop " + TARGET_LAUNCHER
-                });
-                rooted = p.waitFor() == 0;
-            } catch (Throwable ignored) {}
-
-            if (!rooted) {
-                try {
-                    ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
-                    am.killBackgroundProcesses(TARGET_LAUNCHER);
-                } catch (Throwable ignored) {}
-            }
-
-            try { Thread.sleep(350); } catch (InterruptedException ignored) {}
-            runOnUiThread(() -> {
-                Intent home = new Intent(Intent.ACTION_MAIN);
-                home.addCategory(Intent.CATEGORY_HOME);
-                home.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                try {
-                    startActivity(home);
-                } catch (Throwable t) {
-                    Toast.makeText(this, "配置已保存，请手动回到桌面", Toast.LENGTH_LONG).show();
-                }
-            });
-        }, "LauncherHub-Restart").start();
-    }
-
     private void confirmReset() {
         new AlertDialog.Builder(this)
                 .setTitle("恢复默认设置")
@@ -599,8 +567,8 @@ public final class MainActivity extends Activity {
                 .setPositiveButton("恢复", (dialog, which) -> {
                     prefs.edit().clear().apply();
                     notifyConfigChanged();
-                    Toast.makeText(this, "已恢复默认设置。重新打开应用以刷新界面。",
-                            Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "已恢复默认设置", Toast.LENGTH_SHORT).show();
+                    recreate();
                 })
                 .setNegativeButton("取消", null)
                 .show();
