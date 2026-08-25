@@ -33,6 +33,8 @@ public final class ConfigProvider extends ContentProvider {
             b.putInt(ConfigKeys.DOT_COLOR, p.getInt(ConfigKeys.DOT_COLOR, 0));
             b.putBoolean(ConfigKeys.PRESS_SCALE_ENABLED, p.getBoolean(ConfigKeys.PRESS_SCALE_ENABLED, false));
             b.putInt(ConfigKeys.PRESS_SCALE_PERCENT, p.getInt(ConfigKeys.PRESS_SCALE_PERCENT, 92));
+            b.putBoolean(ConfigKeys.RECENTS_MEMINFO, p.getBoolean(ConfigKeys.RECENTS_MEMINFO, false));
+            b.putBoolean(ConfigKeys.RECENTS_MEMINFO_ZRAM, p.getBoolean(ConfigKeys.RECENTS_MEMINFO_ZRAM, false));
             b.putString(ConfigKeys.ICON_PACK, p.getString(ConfigKeys.ICON_PACK, ""));
             Set<String> hidden = p.getStringSet(ConfigKeys.HIDDEN_PACKAGES, Collections.emptySet());
             Set<String> renamed = p.getStringSet(ConfigKeys.RENAMED_PACKAGES, Collections.emptySet());
