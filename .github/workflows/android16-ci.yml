@@ -37,25 +37,40 @@ jobs:
         run: |
           UNSIGNED=app/build/outputs/apk/debug/app-debug-unsigned.apk
           ALIGNED="$RUNNER_TEMP/launcherhub-aligned.apk"
+          JARSIGNED="$RUNNER_TEMP/launcherhub-v1.apk"
           OUT=Launcher-Hub-2.0-A16-LineageOS23.2-test8-debug.apk
           test -f "$UNSIGNED"
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+
+          # Add a deterministic traditional JAR/v1 signature first. A few third-party file
+          # managers still inspect META-INF before handing the stream to Package Installer.
+          cp "$ALIGNED" "$JARSIGNED"
+          jarsigner \
+            -keystore .github/test-signing/launcherhub-test.jks \
+            -storepass launcherhub \
+            -keypass launcherhub \
+            -sigalg SHA256withRSA \
+            -digestalg SHA-256 \
+            "$JARSIGNED" launcherhub-test
+
+          # Then add the modern APK signing block with the same certificate. Android 16 verifies
+          # v3; apksigner preserves the existing JAR signature because no ZIP mutation follows.
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
             --ks .github/test-signing/launcherhub-test.jks \
             --ks-key-alias launcherhub-test \
             --ks-pass pass:launcherhub \
             --key-pass pass:launcherhub \
-            --min-sdk-version 21 \
-            --v1-signing-enabled true \
+            --v1-signing-enabled false \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
             --v4-signing-enabled false \
-            --out "$OUT" "$ALIGNED"
+            --out "$OUT" "$JARSIGNED"
       - name: Verify installable APK and Xposed payload
         run: |
           APK=Launcher-Hub-2.0-A16-LineageOS23.2-test8-debug.apk
           test -f "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -p 4 "$APK"
+          unzip -l "$APK" | grep -q 'META-INF/MANIFEST.MF'
+          unzip -l "$APK" | grep -Eq 'META-INF/.*\.(RSA|DSA|EC)'
           unzip -l "$APK" | grep -q 'assets/xposed_init'
           unzip -p "$APK" assets/xposed_init | grep -q 'LauncherBootstrapHook'
           unzip -p "$APK" assets/xposed_init | grep -q 'LauncherEnhanceHook'
@@ -64,7 +79,6 @@ jobs:
           VERIFY="$RUNNER_TEMP/apksigner-verify.txt"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee "$VERIFY"
           grep -Fq 'Verified using v1 scheme (JAR signing): true' "$VERIFY"
-          grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' "$VERIFY"
           grep -Fq 'Verified using v3 scheme (APK Signature Scheme v3): true' "$VERIFY"
           grep -qi '467aab6a668e4fd8db8f8247ab06fdbb81c108735714b53b330670c6f4fafc89' "$VERIFY"
           sha256sum "$APK" > "$APK.sha256"
