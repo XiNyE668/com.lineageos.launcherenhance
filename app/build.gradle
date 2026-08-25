@@ -14,7 +14,21 @@ android {
         versionName '2.0-A16-test2'
     }
 
+    signingConfigs {
+        ciTest {
+            storeFile rootProject.file('.github/test-signing/launcherhub-test.jks')
+            storePassword 'launcherhub'
+            keyAlias 'launcherhub-test'
+            keyPassword 'launcherhub'
+        }
+    }
+
     buildTypes {
+        debug {
+            if (rootProject.file('.github/test-signing/launcherhub-test.jks').exists()) {
+                signingConfig signingConfigs.ciTest
+            }
+        }
         release {
             minifyEnabled true
             shrinkResources true
