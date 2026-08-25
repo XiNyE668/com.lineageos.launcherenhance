@@ -31,13 +31,31 @@ jobs:
           base64 -d .github/test-signing/launcherhub-test.jks.b64 > .github/test-signing/launcherhub-test.jks
           keytool -list -keystore .github/test-signing/launcherhub-test.jks \
             -storepass launcherhub -alias launcherhub-test >/dev/null
-      - name: Build debug APK
+      - name: Build unsigned debug APK
         run: gradle --no-daemon :app:assembleDebug
+      - name: Align and compatibility-sign APK
+        run: |
+          UNSIGNED=app/build/outputs/apk/debug/app-debug-unsigned.apk
+          ALIGNED="$RUNNER_TEMP/launcherhub-aligned.apk"
+          OUT=Launcher-Hub-2.0-A16-LineageOS23.2-test8-debug.apk
+          test -f "$UNSIGNED"
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
+            --ks .github/test-signing/launcherhub-test.jks \
+            --ks-key-alias launcherhub-test \
+            --ks-pass pass:launcherhub \
+            --key-pass pass:launcherhub \
+            --min-sdk-version 21 \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --v4-signing-enabled false \
+            --out "$OUT" "$ALIGNED"
       - name: Verify installable APK and Xposed payload
         run: |
-          APK=app/build/outputs/apk/debug/app-debug.apk
-          OUT=Launcher-Hub-2.0-A16-LineageOS23.2-test8-debug.apk
+          APK=Launcher-Hub-2.0-A16-LineageOS23.2-test8-debug.apk
           test -f "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/zipalign" -c -p 4 "$APK"
           unzip -l "$APK" | grep -q 'assets/xposed_init'
           unzip -p "$APK" assets/xposed_init | grep -q 'LauncherBootstrapHook'
           unzip -p "$APK" assets/xposed_init | grep -q 'LauncherEnhanceHook'
@@ -49,8 +67,7 @@ jobs:
           grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' "$VERIFY"
           grep -Fq 'Verified using v3 scheme (APK Signature Scheme v3): true' "$VERIFY"
           grep -qi '467aab6a668e4fd8db8f8247ab06fdbb81c108735714b53b330670c6f4fafc89' "$VERIFY"
-          cp "$APK" "$OUT"
-          sha256sum "$OUT" > "$OUT.sha256"
+          sha256sum "$APK" > "$APK.sha256"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
