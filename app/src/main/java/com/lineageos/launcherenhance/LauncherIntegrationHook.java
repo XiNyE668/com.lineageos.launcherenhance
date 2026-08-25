@@ -10,7 +10,6 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
-import android.view.View;
 
 import java.util.List;
 import java.util.Set;
@@ -159,8 +158,7 @@ public final class LauncherIntegrationHook implements IXposedHookLoadPackage {
                     new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
-                            if (!(param.thisObject instanceof View.OnCreateContextMenuListener)
-                                    && param.thisObject == null) return;
+                            if (param.thisObject == null) return;
                             scheduleActivityInjection(param.thisObject, 80L);
                             scheduleActivityInjection(param.thisObject, 300L);
                             scheduleActivityInjection(param.thisObject, 900L);
