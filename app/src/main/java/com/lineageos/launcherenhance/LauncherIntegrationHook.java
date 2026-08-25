@@ -24,9 +24,9 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 /**
  * Trebuchet-side integration for Launcher Hub.
  *
- * Home settings injection deliberately has multiple independent hook paths. LineageOS Launcher3
- * can change the exact PreferenceFragment lifecycle between point releases, so relying on only
- * LauncherSettingsFragment.onCreatePreferences() is unnecessarily fragile.
+ * Home settings injection deliberately has multiple independent hook paths. The primary Android
+ * 16 path anchors Launcher Hub directly before LineageOS' pref_workspace_lock entry while the
+ * fragment/activity hooks remain as fallbacks for future Launcher3 changes.
  *
  * Config changes are observed from inside the Trebuchet process. Trebuchet then terminates its own
  * process so structural hooks and icon-pack drawables are rebuilt without requiring root access.
@@ -38,6 +38,7 @@ public final class LauncherIntegrationHook implements IXposedHookLoadPackage {
     private static final String LAUNCHER_SETTINGS_FRAGMENT =
             "com.android.launcher3.settings.SettingsActivity$LauncherSettingsFragment";
     private static final String PREF_KEY = "launcher_hub_settings";
+    private static final String LOCK_LAYOUT_KEY = "pref_workspace_lock";
     private static final String TAG = "LauncherHub/Integration";
 
     private static final AtomicBoolean OBSERVER_REGISTERED = new AtomicBoolean(false);
@@ -53,6 +54,7 @@ public final class LauncherIntegrationHook implements IXposedHookLoadPackage {
         if (!TARGET.equals(lpparam.packageName)) return;
 
         hookApplicationAttach();
+        hookPreferenceGroupAnchor(lpparam.classLoader);
         hookLauncherSettingsFragment(lpparam.classLoader);
         hookPreferenceInflationFallback(lpparam.classLoader);
         hookSettingsActivityFallback(lpparam.classLoader);
@@ -101,6 +103,42 @@ public final class LauncherIntegrationHook implements IXposedHookLoadPackage {
         MAIN.postDelayed(RESTART, 220L);
     }
 
+    /**
+     * Primary LineageOS 23.2 path. launcher_preferences.xml starts with pref_workspace_lock.
+     * Intercept that preference as it is being added and insert Launcher Hub first, so there is no
+     * ambiguity about which PreferenceScreen or ordering rules are active on the device.
+     */
+    private static void hookPreferenceGroupAnchor(ClassLoader cl) {
+        try {
+            Class<?> preference = XposedHelpers.findClass("androidx.preference.Preference", cl);
+            Class<?> preferenceGroup = XposedHelpers.findClass("androidx.preference.PreferenceGroup", cl);
+            XposedHelpers.findAndHookMethod(preferenceGroup, "addPreference", preference,
+                    new XC_MethodHook() {
+                        @Override
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            if (param.args.length == 0 || param.args[0] == null) return;
+                            Object incoming = param.args[0];
+                            Object keyObject = XposedHelpers.callMethod(incoming, "getKey");
+                            if (!LOCK_LAYOUT_KEY.equals(keyObject)) return;
+
+                            Object screen = param.thisObject;
+                            Object existing = XposedHelpers.callMethod(screen, "findPreference", PREF_KEY);
+                            if (existing != null) return;
+
+                            Object contextObject = XposedHelpers.callMethod(screen, "getContext");
+                            if (!(contextObject instanceof Context)) return;
+                            addLauncherHubPreferenceToScreen(
+                                    screen, (Context) contextObject, incoming.getClass().getClassLoader());
+                            XposedBridge.log(TAG + ": anchored Launcher Hub before Lock layout");
+                        }
+                    });
+            XposedBridge.log(TAG + ": PreferenceGroup anchor hook OK");
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": PreferenceGroup anchor hook failed: " + t);
+            XposedBridge.log(t);
+        }
+    }
+
     /** Fast path for the exact LineageOS 23.2 fragment currently in source. */
     private static void hookLauncherSettingsFragment(ClassLoader cl) {
         try {
@@ -118,10 +156,7 @@ public final class LauncherIntegrationHook implements IXposedHookLoadPackage {
         }
     }
 
-    /**
-     * Fallback at the AndroidX Preference layer. This survives minor LauncherSettingsFragment
-     * lifecycle/signature changes while still being restricted to Trebuchet's settings fragment.
-     */
+    /** Fallback at the AndroidX Preference inflation layer. */
     private static void hookPreferenceInflationFallback(ClassLoader cl) {
         try {
             Class<?> prefFragment = XposedHelpers.findClass(
@@ -145,11 +180,7 @@ public final class LauncherIntegrationHook implements IXposedHookLoadPackage {
         }
     }
 
-    /**
-     * Final fallback: after SettingsActivity creates/commits its fragment, resolve the active
-     * support FragmentManager and inject the preference. We retry because FragmentTransaction
-     * commit() is asynchronous.
-     */
+    /** Final fallback through SettingsActivity after its fragment transaction is committed. */
     private static void hookSettingsActivityFallback(ClassLoader cl) {
         try {
             Class<?> settingsActivity = XposedHelpers.findClass(
@@ -180,8 +211,6 @@ public final class LauncherIntegrationHook implements IXposedHookLoadPackage {
         try {
             Object fm = XposedHelpers.callMethod(activity, "getSupportFragmentManager");
             if (fm == null) return;
-
-            // Prefer the currently attached fragment list; this avoids depending on resource IDs.
             Object fragmentsObject = XposedHelpers.callMethod(fm, "getFragments");
             if (fragmentsObject instanceof List) {
                 for (Object fragment : (List<Object>) fragmentsObject) {
@@ -211,19 +240,29 @@ public final class LauncherIntegrationHook implements IXposedHookLoadPackage {
                 XposedBridge.log(TAG + ": preference screen/context not ready");
                 return;
             }
+            addLauncherHubPreferenceToScreen(
+                    screen, (Context) contextObject, fragment.getClass().getClassLoader());
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": add Home settings entry failed: " + t);
+            XposedBridge.log(t);
+        }
+    }
 
+    private static void addLauncherHubPreferenceToScreen(
+            Object screen, Context context, ClassLoader cl) {
+        try {
             Object existing = XposedHelpers.callMethod(screen, "findPreference", PREF_KEY);
             if (existing != null) return;
 
-            Context context = (Context) contextObject;
-            ClassLoader cl = fragment.getClass().getClassLoader();
             Class<?> preferenceClass = XposedHelpers.findClass("androidx.preference.Preference", cl);
             Object preference = XposedHelpers.newInstance(preferenceClass, context);
             XposedHelpers.callMethod(preference, "setKey", PREF_KEY);
             XposedHelpers.callMethod(preference, "setTitle", (CharSequence) "Launcher Hub");
             XposedHelpers.callMethod(preference, "setSummary",
                     (CharSequence) "图标、应用抽屉、最近任务与 Trebuchet 增强");
-            XposedHelpers.callMethod(preference, "setOrder", 900);
+            // Explicitly above the XML's first item: Lock layout / pref_workspace_lock.
+            XposedHelpers.callMethod(preference, "setOrder", -10000);
+            XposedHelpers.callMethod(preference, "setPersistent", false);
 
             Intent intent = new Intent();
             intent.setComponent(new ComponentName(MODULE, SETTINGS_ACTIVITY));
@@ -231,10 +270,9 @@ public final class LauncherIntegrationHook implements IXposedHookLoadPackage {
             XposedHelpers.callMethod(preference, "setIntent", intent);
 
             Object result = XposedHelpers.callMethod(screen, "addPreference", preference);
-            XposedBridge.log(TAG + ": Launcher Hub preference injected; result=" + result
-                    + " fragment=" + fragment.getClass().getName());
+            XposedBridge.log(TAG + ": Launcher Hub preference injected at top; result=" + result);
         } catch (Throwable t) {
-            XposedBridge.log(TAG + ": add Home settings entry failed: " + t);
+            XposedBridge.log(TAG + ": add preference to screen failed: " + t);
             XposedBridge.log(t);
         }
     }
