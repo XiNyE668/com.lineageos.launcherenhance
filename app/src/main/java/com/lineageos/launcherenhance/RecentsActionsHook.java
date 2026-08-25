@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
-import android.os.SystemClock;
 import android.util.TypedValue;
 import android.view.View;
 import android.view.ViewGroup;
@@ -21,23 +20,18 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * Places a proxy for Trebuchet's Clear all action beside Screenshot while keeping the original
- * ClearAllButton in RecentsView as an invisible layout placeholder. This avoids disturbing
- * RecentsView's page/index/scroll bookkeeping on Android 16 / LineageOS 23.2.
+ * Keeps Trebuchet's original ClearAllButton inside RecentsView as an invisible layout placeholder,
+ * while exposing a working proxy beside Screenshot. The proxy delegates to the original button's
+ * click listener, preserving Trebuchet's own dismiss animation and filtered-recents behaviour.
  */
 public final class RecentsActionsHook implements IXposedHookLoadPackage {
     private static final String TARGET = "com.android.launcher3";
     private static final String TAG = "LauncherHub/RecentsActions";
-    private static final long CONFIG_CACHE_MS = 2000L;
     private static final Map<View, Button> PROXIES = new WeakHashMap<>();
-
-    private static volatile Config cachedConfig = new Config(false, ConfigKeys.CLEAR_ALL_SIDE_RIGHT);
-    private static volatile long configLoadedAt;
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
         if (!TARGET.equals(lpparam.packageName)) return;
-
         hookOverviewActions(lpparam.classLoader);
         hookRecentsView(lpparam.classLoader);
         hookOriginalClearAll(lpparam.classLoader);
@@ -50,9 +44,7 @@ public final class RecentsActionsHook implements IXposedHookLoadPackage {
             XposedHelpers.findAndHookMethod(actions, "onFinishInflate", new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
-                    if (param.thisObject instanceof View) {
-                        installProxy((View) param.thisObject);
-                    }
+                    if (param.thisObject instanceof View) installProxy((View) param.thisObject);
                 }
             });
             XposedBridge.log(TAG + ": OverviewActionsView hook OK");
@@ -71,7 +63,7 @@ public final class RecentsActionsHook implements IXposedHookLoadPackage {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             if (param.thisObject instanceof View) {
-                                syncOriginalClearAll((View) param.thisObject);
+                                suppressOriginal((View) param.thisObject);
                             }
                         }
                     });
@@ -91,23 +83,10 @@ public final class RecentsActionsHook implements IXposedHookLoadPackage {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
                             if (param.thisObject instanceof View) {
-                                suppressOriginalIfNeeded((View) param.thisObject);
+                                hideOriginalButton((View) param.thisObject);
                             }
                         }
                     });
-            try {
-                XposedHelpers.findAndHookMethod(clearAll, "setContentAlpha", float.class,
-                        new XC_MethodHook() {
-                            @Override
-                            protected void afterHookedMethod(MethodHookParam param) {
-                                if (param.thisObject instanceof View) {
-                                    suppressOriginalIfNeeded((View) param.thisObject);
-                                }
-                            }
-                        });
-            } catch (Throwable ignored) {
-                // Kotlin accessor names can vary between Launcher revisions; scroll hook is enough.
-            }
             XposedBridge.log(TAG + ": ClearAllButton hook OK");
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": ClearAllButton hook failed: " + t);
@@ -116,10 +95,6 @@ public final class RecentsActionsHook implements IXposedHookLoadPackage {
     }
 
     private static void installProxy(View actionsView) {
-        Context context = actionsView.getContext();
-        Config config = readConfig(context);
-        if (!config.inline) return;
-
         synchronized (PROXIES) {
             if (PROXIES.containsKey(actionsView)) return;
 
@@ -133,6 +108,7 @@ public final class RecentsActionsHook implements IXposedHookLoadPackage {
             if (!(rowObject instanceof LinearLayout)) return;
             LinearLayout row = (LinearLayout) rowObject;
 
+            Context context = actionsView.getContext();
             Resources res = context.getResources();
             int screenshotId = res.getIdentifier("action_screenshot", "id", TARGET);
             View screenshot = screenshotId == 0 ? null : actionsView.findViewById(screenshotId);
@@ -142,11 +118,12 @@ public final class RecentsActionsHook implements IXposedHookLoadPackage {
             }
 
             Button proxy = createProxyButton(context, screenshot);
-            proxy.setOnClickListener(v -> invokeClearAll(actionsView, v));
+            proxy.setOnClickListener(v -> invokeOriginalClearAll(actionsView));
 
+            int side = readSide(context);
             int screenshotIndex = row.indexOfChild(screenshot);
             if (screenshotIndex < 0) screenshotIndex = 0;
-            int insertIndex = config.side == ConfigKeys.CLEAR_ALL_SIDE_LEFT
+            int insertIndex = side == ConfigKeys.CLEAR_ALL_SIDE_LEFT
                     ? screenshotIndex : screenshotIndex + 1;
             insertIndex = Math.max(0, Math.min(insertIndex, row.getChildCount()));
 
@@ -154,18 +131,15 @@ public final class RecentsActionsHook implements IXposedHookLoadPackage {
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT);
-            if (config.side == ConfigKeys.CLEAR_ALL_SIDE_LEFT) {
-                lp.rightMargin = spacing;
-            } else {
-                lp.leftMargin = spacing;
-            }
+            if (side == ConfigKeys.CLEAR_ALL_SIDE_LEFT) lp.rightMargin = spacing;
+            else lp.leftMargin = spacing;
 
             try {
                 row.addView(proxy, insertIndex, lp);
                 PROXIES.put(actionsView, proxy);
                 row.requestLayout();
                 XposedBridge.log(TAG + ": inline Clear all added "
-                        + (config.side == ConfigKeys.CLEAR_ALL_SIDE_LEFT ? "left" : "right")
+                        + (side == ConfigKeys.CLEAR_ALL_SIDE_LEFT ? "left" : "right")
                         + " of Screenshot");
             } catch (Throwable t) {
                 XposedBridge.log(TAG + ": add proxy failed: " + t);
@@ -215,74 +189,62 @@ public final class RecentsActionsHook implements IXposedHookLoadPackage {
         return button;
     }
 
-    private static void invokeClearAll(View actionsView, View source) {
+    private static void invokeOriginalClearAll(View actionsView) {
         try {
-            Resources res = actionsView.getResources();
-            int overviewId = res.getIdentifier("overview_panel", "id", TARGET);
-            View root = actionsView.getRootView();
-            View recents = overviewId == 0 ? null : root.findViewById(overviewId);
+            View recents = findRecents(actionsView);
             if (recents == null) {
                 XposedBridge.log(TAG + ": overview_panel not found");
                 return;
             }
-            XposedHelpers.callMethod(recents, "dismissAllTasks", source);
+            Object original = XposedHelpers.getObjectField(recents, "mClearAllButton");
+            if (original instanceof View) {
+                boolean handled = ((View) original).performClick();
+                XposedBridge.log(TAG + ": original Clear all performClick=" + handled);
+                if (handled) return;
+            }
+            // Fallback for unusual Launcher revisions where the click listener is unavailable.
+            XposedHelpers.callMethod(recents, "dismissAllTasks", original instanceof View
+                    ? original : recents);
         } catch (Throwable t) {
-            XposedBridge.log(TAG + ": dismissAllTasks failed: " + t);
+            XposedBridge.log(TAG + ": Clear all delegation failed: " + t);
             XposedBridge.log(t);
         }
     }
 
-    private static void syncOriginalClearAll(View recentsView) {
+    private static View findRecents(View actionsView) {
+        Resources res = actionsView.getResources();
+        int overviewId = res.getIdentifier("overview_panel", "id", TARGET);
+        return overviewId == 0 ? null : actionsView.getRootView().findViewById(overviewId);
+    }
+
+    private static void suppressOriginal(View recentsView) {
         try {
             Object value = XposedHelpers.getObjectField(recentsView, "mClearAllButton");
-            if (!(value instanceof View)) return;
-            View clearAll = (View) value;
-            Config config = readConfig(recentsView.getContext());
-            if (config.inline) {
-                clearAll.setVisibility(View.INVISIBLE);
-                clearAll.setAlpha(0f);
-                clearAll.setImportantForAccessibility(
-                        View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
-            } else {
-                clearAll.setVisibility(View.VISIBLE);
-                clearAll.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_AUTO);
-            }
+            if (value instanceof View) hideOriginalButton((View) value);
         } catch (Throwable t) {
-            XposedBridge.log(TAG + ": sync original ClearAll failed: " + t);
+            XposedBridge.log(TAG + ": suppress original Clear all failed: " + t);
         }
     }
 
-    private static void suppressOriginalIfNeeded(View clearAll) {
-        if (!readConfig(clearAll.getContext()).inline) return;
+    private static void hideOriginalButton(View clearAll) {
         clearAll.setVisibility(View.INVISIBLE);
         clearAll.setAlpha(0f);
-        clearAll.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        clearAll.setImportantForAccessibility(
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
     }
 
-    private static Config readConfig(Context context) {
-        long now = SystemClock.uptimeMillis();
-        if (now - configLoadedAt < CONFIG_CACHE_MS) return cachedConfig;
-        synchronized (RecentsActionsHook.class) {
-            now = SystemClock.uptimeMillis();
-            if (now - configLoadedAt < CONFIG_CACHE_MS) return cachedConfig;
-            try {
-                Bundle b = context.getContentResolver().call(
-                        ConfigKeys.URI, ConfigKeys.METHOD_GET_CONFIG, null, null);
-                if (b != null) {
-                    boolean inline = b.getBoolean(ConfigKeys.RECENTS_CLEAR_ALL_INLINE, false);
-                    int side = b.getInt(ConfigKeys.RECENTS_CLEAR_ALL_SIDE,
-                            ConfigKeys.CLEAR_ALL_SIDE_RIGHT);
-                    if (side != ConfigKeys.CLEAR_ALL_SIDE_LEFT) {
-                        side = ConfigKeys.CLEAR_ALL_SIDE_RIGHT;
-                    }
-                    cachedConfig = new Config(inline, side);
-                }
-            } catch (Throwable t) {
-                XposedBridge.log(TAG + ": config read failed: " + t);
+    private static int readSide(Context context) {
+        try {
+            Bundle b = context.getContentResolver().call(
+                    ConfigKeys.URI, ConfigKeys.METHOD_GET_CONFIG, null, null);
+            if (b != null && b.getInt(ConfigKeys.RECENTS_CLEAR_ALL_SIDE,
+                    ConfigKeys.CLEAR_ALL_SIDE_RIGHT) == ConfigKeys.CLEAR_ALL_SIDE_LEFT) {
+                return ConfigKeys.CLEAR_ALL_SIDE_LEFT;
             }
-            configLoadedAt = now;
-            return cachedConfig;
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": config read failed: " + t);
         }
+        return ConfigKeys.CLEAR_ALL_SIDE_RIGHT;
     }
 
     private static int dimensionByName(Context context, String name) {
@@ -296,14 +258,5 @@ public final class RecentsActionsHook implements IXposedHookLoadPackage {
 
     private static int dp(Context context, int value) {
         return Math.round(value * context.getResources().getDisplayMetrics().density);
-    }
-
-    private static final class Config {
-        final boolean inline;
-        final int side;
-        Config(boolean inline, int side) {
-            this.inline = inline;
-            this.side = side;
-        }
     }
 }
