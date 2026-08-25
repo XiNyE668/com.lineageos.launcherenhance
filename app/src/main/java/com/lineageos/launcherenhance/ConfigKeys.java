@@ -22,6 +22,8 @@ final class ConfigKeys {
     static final String DOT_COLOR = "dot_color";
     static final String PRESS_SCALE_ENABLED = "press_scale_enabled";
     static final String PRESS_SCALE_PERCENT = "press_scale_percent";
+    static final String RECENTS_MEMINFO = "recents_meminfo";
+    static final String RECENTS_MEMINFO_ZRAM = "recents_meminfo_zram";
     static final String ICON_PACK = "icon_pack";
     static final String HIDDEN_PACKAGES = "hidden_packages";
     static final String RENAMED_PACKAGES = "renamed_packages";
