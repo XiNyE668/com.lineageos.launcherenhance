@@ -36,12 +36,13 @@ jobs:
       - name: Verify installable APK and Xposed payload
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
-          OUT=Launcher-Hub-2.0-A16-LineageOS23.2-test6-debug.apk
+          OUT=Launcher-Hub-2.0-A16-LineageOS23.2-test7-debug.apk
           test -f "$APK"
           unzip -l "$APK" | grep -q 'assets/xposed_init'
+          unzip -p "$APK" assets/xposed_init | grep -q 'LauncherBootstrapHook'
+          unzip -p "$APK" assets/xposed_init | grep -q 'LauncherEnhanceHook'
           unzip -p "$APK" assets/xposed_init | grep -q 'RecentsMemoryHook'
           unzip -p "$APK" assets/xposed_init | grep -q 'RecentsActionsHook'
-          unzip -p "$APK" assets/xposed_init | grep -q 'LauncherIntegrationHook'
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" \
             | grep -qi '467aab6a668e4fd8db8f8247ab06fdbb81c108735714b53b330670c6f4fafc89'
@@ -50,7 +51,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Launcher-Hub-2.0-A16-LineageOS23.2-test6
+          name: Launcher-Hub-2.0-A16-LineageOS23.2-test7
           path: |
-            Launcher-Hub-2.0-A16-LineageOS23.2-test6-debug.apk
-            Launcher-Hub-2.0-A16-LineageOS23.2-test6-debug.apk.sha256
+            Launcher-Hub-2.0-A16-LineageOS23.2-test7-debug.apk
+            Launcher-Hub-2.0-A16-LineageOS23.2-test7-debug.apk.sha256
