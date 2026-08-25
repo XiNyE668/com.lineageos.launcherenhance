@@ -26,6 +26,11 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Prepare deterministic test signing key
+        run: |
+          base64 -d .github/test-signing/launcherhub-test.jks.b64 > .github/test-signing/launcherhub-test.jks
+          keytool -list -keystore .github/test-signing/launcherhub-test.jks \
+            -storepass launcherhub -alias launcherhub-test >/dev/null
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
       - name: Verify installable APK and Xposed payload
@@ -36,6 +41,8 @@ jobs:
           unzip -l "$APK" | grep -q 'assets/xposed_init'
           unzip -p "$APK" assets/xposed_init | grep -q 'RecentsMemoryHook'
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" \
+            | grep -q '46:7A:AB:6A:66:8E:4F:D8:DB:8F:82:47:AB:06:FD:BB:81:C1:08:73:57:14:B5:3B:33:06:70:C6:F4:FA:FC:89'
           cp "$APK" "$OUT"
           sha256sum "$OUT" > "$OUT.sha256"
       - name: Upload APK
