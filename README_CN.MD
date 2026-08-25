@@ -1,44 +1,20 @@
-# Launcher3Customizer
+# Launcher Enhance
 
-[English](README.MD) | 简体中文
+面向 **Android 16 / LineageOS 23.2 Trebuchet** 重写的 Launcher3 定制 LSPosed 模块。原项目 MIT 版权声明继续保留在 `LICENSE`。
 
-安卓原生桌面的定制模块
+## Test 1 功能
+- 桌面 / 应用抽屉标题独立隐藏
+- 桌面/文件夹与应用抽屉图标、文字大小独立调节
+- 图标与标题间距调节
+- 标准 Launcher 图标包（`appfilter.xml`）
+- 单 App 显示名称重命名
+- 隐藏当前主用户的应用抽屉 App，不过滤 Work Profile / Private Space
+- 隐藏首屏 QSB / At A Glance
+- 文件夹强制屏幕居中
+- 通知圆点隐藏、颜色调整、数字角标
+- 可选图标按压缩放效果
+- Hook 自检状态
 
-# 议题
-
-在[这里](https://github.com/gitofleonardo/Launcher30)提交 issue
-
-# 前置条件
-
-需要安装 `LSPosed` 模块。
-
-# 特性
-
-+ 更改图标包
-+ 更改应用的名字
-+ 使用自定义的图标点击效果
-+ 支持自适应图标
-+ 支持隐藏桌面图标标题
-+ 支持隐藏应用抽屉图标标题
-+ 支持改变图标大小
-+ 支持改变图标标题大小
-+ A支持改变图标与标题之间的间距大小
-+ 更改桌面红点通知的颜色
-+ 支持在通知红点上显示通知数量
-+ 隐藏桌面拖动的时候的背景
-+ 关闭没有用的 `At A Glance` 组件
-+ 打开文件夹居中
-+ 管理隐私应用
-+ ... 待开发
-
-# 更新
-
-功能更新或者是 bug 修复将取决于我的计划。或者是你也可以自己来提交新功能。
-
-Btw, 我的小米13还没有可用的类原生包，所以目前可能不会投入很多时间在这个项目中。
-
-# 注意
-
-只在 `PixelExperience` 安卓13上测试过，不保证能够在所有的系统中运行。一些类原生的包应该可以运行，只要他们没有在原生的基础上改太多东西的话。
-
-对于那些高度自定义的系统，例如 MIUI，我敢肯定是没法正常运行的，而且也完全没必要在那些系统上安装本模块，因为他们已经提供了很多高度自定义的功能。
+## 作者
+- 原始 Launcher3Customizer：gitofleonardo / hhvvg（MIT）
+- Android 16 重写：XiNyE & ChatGPT

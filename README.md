@@ -1,44 +1,27 @@
-# Launcher3Customizer
+# Launcher Enhance
 
-English | [简体中文](README_CN.MD)
+Launcher3 / Trebuchet customization module rebuilt for **Android 16 / LineageOS 23.2**.
 
-Utilities for `Launcher3` customizations
+This repository is a modern rewrite of the abandoned Launcher3Customizer concept. The original MIT copyright notice is preserved in `LICENSE`.
 
-# Issues
+## Target
+- Android 16 (API 36)
+- LineageOS 23.2 Trebuchet (`com.android.launcher3`)
+- LSPosed
 
-Post issues [here](https://github.com/gitofleonardo/Launcher30)
+## Test 1 features
+- Workspace and app-drawer labels can be hidden independently
+- Workspace/folder and app-drawer icon and label sizes can be scaled independently
+- Icon/label gap adjustment
+- Standard Launcher icon-pack support through `appfilter.xml`
+- Per-app visible label rename
+- Hide selected apps from the current user's app drawer without filtering work/private profiles
+- Hide first-screen QSB / At A Glance
+- Force opened folders to screen center
+- Hide/recolor notification dots or replace them with numeric badges
+- Optional icon press-scale feedback
+- Hook diagnostics
 
-# Prerequisite
-
-`LSPosed` installed.
-
-# Features
-
-+ Change icon packs
-+ Change label for app icons as you want
-+ Customized icon touch effect
-+ Adaptive icon supported
-+ Able to hide icon text on workspace
-+ Able to hide icon text on apps drawer
-+ Able to change icon size
-+ Able to change icon text size
-+ Able to change icon text drawable padding
-+ Change color of notification dots
-+ Show notification count on badges
-+ Hide SpringLoaded background
-+ Hide useless Qsb on first screen
-+ Center opened folder
-+ Manage privacy apps
-+ ... May be more
-
-# Updates
-
-Any feature or bugfix updates will depend on my plans. Maybe you could do it yourself.
-
-Btw, there's no AOSP-like roms for my Mi-13 device, so I will probably not spend too much time on this project right now.
-
-# Notice
-
-Tested on `PixelExperience`, AndroidT only, it's not guaranteed to work on every rom. Some AOSP-like roms may work, as long as they haven't changed too much of AOSP codes.
-
-For those highly-customized roms like MIUI, I am quite sure it's not working at all, and there's no need to use this module on those roms since they've already provided lots of features.
+## Credits
+- Original Launcher3Customizer: gitofleonardo / hhvvg (MIT, 2023)
+- Android 16 rewrite: XiNyE & ChatGPT

@@ -1,0 +1,5 @@
+-keep class com.lineageos.launcherenhance.LauncherEnhanceHook { *; }
+-keep class com.lineageos.launcherenhance.ConfigProvider { *; }
+-keep class com.lineageos.launcherenhance.MainActivity { *; }
+-keep class de.robv.android.xposed.** { *; }
+-dontwarn de.robv.android.xposed.**
