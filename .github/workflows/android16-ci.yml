@@ -41,16 +41,17 @@ jobs:
           test -f "$UNSIGNED"
           "$ANDROID_HOME/build-tools/36.0.0/zipalign" -p -f 4 "$UNSIGNED" "$ALIGNED"
 
-          # Force the two broadly understood embedded signature schemes. The APK manifest still
-          # declares minSdk 30; these apksigner bounds only control signature generation.
+          # Force APK Signature Scheme v2 instead of the AGP 8.7/minSdk30 default v3-only package.
+          # v2 is accepted by modern Android while remaining friendlier to older third-party APK
+          # parsers/file-manager hand-off paths. The signing certificate is unchanged.
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
             --ks .github/test-signing/launcherhub-test.jks \
             --ks-key-alias launcherhub-test \
             --ks-pass pass:launcherhub \
             --key-pass pass:launcherhub \
-            --min-sdk-version 21 \
+            --min-sdk-version 24 \
             --max-sdk-version 27 \
-            --v1-signing-enabled true \
+            --v1-signing-enabled false \
             --v2-signing-enabled true \
             --v3-signing-enabled false \
             --v4-signing-enabled false \
@@ -59,8 +60,6 @@ jobs:
         run: |
           APK=Launcher-Hub-2.0-A16-LineageOS23.2-test8-debug.apk
           test -f "$APK"
-          unzip -l "$APK" | grep -q 'META-INF/MANIFEST.MF'
-          unzip -l "$APK" | grep -Eq 'META-INF/.*\.(RSA|DSA|EC)'
           unzip -l "$APK" | grep -q 'assets/xposed_init'
           unzip -p "$APK" assets/xposed_init | grep -q 'LauncherBootstrapHook'
           unzip -p "$APK" assets/xposed_init | grep -q 'LauncherEnhanceHook'
@@ -68,7 +67,6 @@ jobs:
           unzip -p "$APK" assets/xposed_init | grep -q 'RecentsActionsHook'
           VERIFY="$RUNNER_TEMP/apksigner-verify.txt"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee "$VERIFY"
-          grep -Fq 'Verified using v1 scheme (JAR signing): true' "$VERIFY"
           grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' "$VERIFY"
           grep -qi '467aab6a668e4fd8db8f8247ab06fdbb81c108735714b53b330670c6f4fafc89' "$VERIFY"
           sha256sum "$APK" > "$APK.sha256"
