@@ -35,6 +35,10 @@ public final class ConfigProvider extends ContentProvider {
             b.putInt(ConfigKeys.PRESS_SCALE_PERCENT, p.getInt(ConfigKeys.PRESS_SCALE_PERCENT, 92));
             b.putBoolean(ConfigKeys.RECENTS_MEMINFO, p.getBoolean(ConfigKeys.RECENTS_MEMINFO, false));
             b.putBoolean(ConfigKeys.RECENTS_MEMINFO_ZRAM, p.getBoolean(ConfigKeys.RECENTS_MEMINFO_ZRAM, false));
+            b.putBoolean(ConfigKeys.RECENTS_CLEAR_ALL_INLINE,
+                    p.getBoolean(ConfigKeys.RECENTS_CLEAR_ALL_INLINE, false));
+            b.putInt(ConfigKeys.RECENTS_CLEAR_ALL_SIDE,
+                    p.getInt(ConfigKeys.RECENTS_CLEAR_ALL_SIDE, ConfigKeys.CLEAR_ALL_SIDE_RIGHT));
             b.putString(ConfigKeys.ICON_PACK, p.getString(ConfigKeys.ICON_PACK, ""));
             Set<String> hidden = p.getStringSet(ConfigKeys.HIDDEN_PACKAGES, Collections.emptySet());
             Set<String> renamed = p.getStringSet(ConfigKeys.RENAMED_PACKAGES, Collections.emptySet());
