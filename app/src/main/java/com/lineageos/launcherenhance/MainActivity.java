@@ -79,7 +79,7 @@ public final class MainActivity extends Activity {
         setContentView(scroll);
 
         TextView title = new TextView(this);
-        title.setText("Launcher Enhance");
+        title.setText("Launcher Hub");
         title.setTextSize(28);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(title);
@@ -135,6 +135,12 @@ public final class MainActivity extends Activity {
         addSwitch("启用自定义图标按压缩放", ConfigKeys.PRESS_SCALE_ENABLED, false);
         addSeek("按下时图标缩放", ConfigKeys.PRESS_SCALE_PERCENT,
                 80, 100, ConfigKeys.DEFAULT_PRESS_SCALE, "%");
+
+        addSection("最近任务");
+        addSwitch("在最近任务底部显示内存信息", ConfigKeys.RECENTS_MEMINFO, false);
+        addSwitch("内存信息同时显示 ZRAM", ConfigKeys.RECENTS_MEMINFO_ZRAM, false);
+        addSwitch("Clear all 与 Screenshot 同一行", ConfigKeys.RECENTS_CLEAR_ALL_INLINE, false);
+        addClearAllSideSpinner();
 
         addSection("应用配置");
         Button apply = addButton("保存并重启 Trebuchet");
@@ -298,6 +304,42 @@ public final class MainActivity extends Activity {
         root.addView(row, fullWidth());
     }
 
+    private void addClearAllSideSpinner() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(0, dp(6), 0, dp(6));
+
+        TextView title = new TextView(this);
+        title.setText("Clear all 位置");
+        title.setTextSize(15);
+        row.addView(title, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        String[] names = {"Screenshot 左边", "Screenshot 右边"};
+        Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_dropdown_item, names);
+        spinner.setAdapter(adapter);
+        int saved = prefs.getInt(ConfigKeys.RECENTS_CLEAR_ALL_SIDE,
+                ConfigKeys.CLEAR_ALL_SIDE_RIGHT);
+        spinner.setSelection(saved == ConfigKeys.CLEAR_ALL_SIDE_LEFT ? 0 : 1, false);
+        spinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                    int position, long id) {
+                int value = position == 0
+                        ? ConfigKeys.CLEAR_ALL_SIDE_LEFT : ConfigKeys.CLEAR_ALL_SIDE_RIGHT;
+                prefs.edit().putInt(ConfigKeys.RECENTS_CLEAR_ALL_SIDE, value).apply();
+                notifyConfigChanged();
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent) {}
+        });
+        row.addView(spinner, new LinearLayout.LayoutParams(dp(170),
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        root.addView(row, fullWidth());
+    }
+
     private void showHiddenAppsDialog() {
         List<AppEntry> apps = loadLauncherApps();
         if (apps.isEmpty()) {
@@ -384,7 +426,7 @@ public final class MainActivity extends Activity {
         labels.add("系统默认图标");
         packages.add("");
         for (AppEntry pack : packs) {
-            labels.add(pack.label + "\n" + pack.packageName);
+            labels.add(pack.label);
             packages.add(pack.packageName);
         }
         String current = prefs.getString(ConfigKeys.ICON_PACK, "");
@@ -485,7 +527,24 @@ public final class MainActivity extends Activity {
 
     private void updateIconPackButton() {
         String pkg = prefs.getString(ConfigKeys.ICON_PACK, "");
-        iconPackButton.setText(pkg.isEmpty() ? "图标包：系统默认" : "图标包：" + pkg);
+        if (pkg.isEmpty()) {
+            iconPackButton.setText("图标包：系统默认");
+            return;
+        }
+        String label = selectedIconPackLabel(pkg);
+        iconPackButton.setText(label == null ? "图标包：已选择" : "图标包：" + label);
+    }
+
+    private String selectedIconPackLabel(String pkg) {
+        try {
+            PackageManager pm = getPackageManager();
+            CharSequence label = pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0));
+            if (label != null && label.length() > 0) return label.toString();
+        } catch (Throwable ignored) {}
+        for (AppEntry entry : loadIconPacks()) {
+            if (pkg.equals(entry.packageName)) return entry.label;
+        }
+        return null;
     }
 
     private void refreshStatus() {
@@ -530,7 +589,7 @@ public final class MainActivity extends Activity {
                     Toast.makeText(this, "配置已保存，请手动回到桌面", Toast.LENGTH_LONG).show();
                 }
             });
-        }, "LauncherEnhance-Restart").start();
+        }, "LauncherHub-Restart").start();
     }
 
     private void confirmReset() {
