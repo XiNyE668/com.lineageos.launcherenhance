@@ -24,6 +24,10 @@ final class ConfigKeys {
     static final String PRESS_SCALE_PERCENT = "press_scale_percent";
     static final String RECENTS_MEMINFO = "recents_meminfo";
     static final String RECENTS_MEMINFO_ZRAM = "recents_meminfo_zram";
+    static final String RECENTS_CLEAR_ALL_INLINE = "recents_clear_all_inline";
+    static final String RECENTS_CLEAR_ALL_SIDE = "recents_clear_all_side";
+    static final int CLEAR_ALL_SIDE_LEFT = 0;
+    static final int CLEAR_ALL_SIDE_RIGHT = 1;
     static final String ICON_PACK = "icon_pack";
     static final String HIDDEN_PACKAGES = "hidden_packages";
     static final String RENAMED_PACKAGES = "renamed_packages";
