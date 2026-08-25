@@ -36,22 +36,25 @@ jobs:
       - name: Verify installable APK and Xposed payload
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
-          OUT=Launcher-Hub-2.0-A16-LineageOS23.2-test7-debug.apk
+          OUT=Launcher-Hub-2.0-A16-LineageOS23.2-test8-debug.apk
           test -f "$APK"
           unzip -l "$APK" | grep -q 'assets/xposed_init'
           unzip -p "$APK" assets/xposed_init | grep -q 'LauncherBootstrapHook'
           unzip -p "$APK" assets/xposed_init | grep -q 'LauncherEnhanceHook'
           unzip -p "$APK" assets/xposed_init | grep -q 'RecentsMemoryHook'
           unzip -p "$APK" assets/xposed_init | grep -q 'RecentsActionsHook'
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" \
-            | grep -qi '467aab6a668e4fd8db8f8247ab06fdbb81c108735714b53b330670c6f4fafc89'
+          VERIFY="$RUNNER_TEMP/apksigner-verify.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee "$VERIFY"
+          grep -Fq 'Verified using v1 scheme (JAR signing): true' "$VERIFY"
+          grep -Fq 'Verified using v2 scheme (APK Signature Scheme v2): true' "$VERIFY"
+          grep -Fq 'Verified using v3 scheme (APK Signature Scheme v3): true' "$VERIFY"
+          grep -qi '467aab6a668e4fd8db8f8247ab06fdbb81c108735714b53b330670c6f4fafc89' "$VERIFY"
           cp "$APK" "$OUT"
           sha256sum "$OUT" > "$OUT.sha256"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Launcher-Hub-2.0-A16-LineageOS23.2-test7
+          name: Launcher-Hub-2.0-A16-LineageOS23.2-test8
           path: |
-            Launcher-Hub-2.0-A16-LineageOS23.2-test7-debug.apk
-            Launcher-Hub-2.0-A16-LineageOS23.2-test7-debug.apk.sha256
+            Launcher-Hub-2.0-A16-LineageOS23.2-test8-debug.apk
+            Launcher-Hub-2.0-A16-LineageOS23.2-test8-debug.apk.sha256
