@@ -35,8 +35,6 @@ public final class ConfigProvider extends ContentProvider {
             b.putInt(ConfigKeys.PRESS_SCALE_PERCENT, p.getInt(ConfigKeys.PRESS_SCALE_PERCENT, 92));
             b.putBoolean(ConfigKeys.RECENTS_MEMINFO, p.getBoolean(ConfigKeys.RECENTS_MEMINFO, false));
             b.putBoolean(ConfigKeys.RECENTS_MEMINFO_ZRAM, p.getBoolean(ConfigKeys.RECENTS_MEMINFO_ZRAM, false));
-            b.putBoolean(ConfigKeys.RECENTS_CLEAR_ALL_INLINE,
-                    p.getBoolean(ConfigKeys.RECENTS_CLEAR_ALL_INLINE, false));
             b.putInt(ConfigKeys.RECENTS_CLEAR_ALL_SIDE,
                     p.getInt(ConfigKeys.RECENTS_CLEAR_ALL_SIDE, ConfigKeys.CLEAR_ALL_SIDE_RIGHT));
             b.putString(ConfigKeys.ICON_PACK, p.getString(ConfigKeys.ICON_PACK, ""));
@@ -48,14 +46,24 @@ public final class ConfigProvider extends ContentProvider {
         }
         if (ConfigKeys.METHOD_REPORT_STATUS.equals(method)) {
             String status = extras == null ? null : extras.getString(ConfigKeys.STATUS);
-            if (status != null) prefs().edit().putString(ConfigKeys.STATUS, status).putLong(ConfigKeys.STATUS_TIME, System.currentTimeMillis()).apply();
+            if (status != null) prefs().edit().putString(ConfigKeys.STATUS, status)
+                    .putLong(ConfigKeys.STATUS_TIME, System.currentTimeMillis()).apply();
             return Bundle.EMPTY;
         }
         return super.call(method, arg, extras);
     }
-    @Override public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs, String sortOrder) { return null; }
+
+    @Override public Cursor query(Uri uri, String[] projection, String selection,
+            String[] selectionArgs, String sortOrder) { return null; }
     @Override public String getType(Uri uri) { return null; }
-    @Override public Uri insert(Uri uri, ContentValues values) { throw new UnsupportedOperationException("Read-only provider"); }
-    @Override public int delete(Uri uri, String selection, String[] selectionArgs) { throw new UnsupportedOperationException("Read-only provider"); }
-    @Override public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) { throw new UnsupportedOperationException("Read-only provider"); }
+    @Override public Uri insert(Uri uri, ContentValues values) {
+        throw new UnsupportedOperationException("Read-only provider");
+    }
+    @Override public int delete(Uri uri, String selection, String[] selectionArgs) {
+        throw new UnsupportedOperationException("Read-only provider");
+    }
+    @Override public int update(Uri uri, ContentValues values, String selection,
+            String[] selectionArgs) {
+        throw new UnsupportedOperationException("Read-only provider");
+    }
 }
