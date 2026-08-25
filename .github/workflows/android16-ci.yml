@@ -12,9 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -28,18 +28,20 @@ jobs:
           gradle-version: '8.9'
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
-      - name: Verify Xposed payload
+      - name: Verify installable APK and Xposed payload
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
+          OUT=Launcher-Hub-2.0-A16-LineageOS23.2-test2-debug.apk
           test -f "$APK"
           unzip -l "$APK" | grep -q 'assets/xposed_init'
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$APK"
-          cp "$APK" Launcher-Enhance-2.0-A16-LineageOS23.2-test1-debug.apk
-          sha256sum Launcher-Enhance-2.0-A16-LineageOS23.2-test1-debug.apk > Launcher-Enhance-2.0-A16-LineageOS23.2-test1-debug.apk.sha256
+          unzip -p "$APK" assets/xposed_init | grep -q 'RecentsMemoryHook'
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          cp "$APK" "$OUT"
+          sha256sum "$OUT" > "$OUT.sha256"
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Launcher-Enhance-2.0-A16-LineageOS23.2-test1
+          name: Launcher-Hub-2.0-A16-LineageOS23.2-test2
           path: |
-            Launcher-Enhance-2.0-A16-LineageOS23.2-test1-debug.apk
-            Launcher-Enhance-2.0-A16-LineageOS23.2-test1-debug.apk.sha256
+            Launcher-Hub-2.0-A16-LineageOS23.2-test2-debug.apk
+            Launcher-Hub-2.0-A16-LineageOS23.2-test2-debug.apk.sha256
