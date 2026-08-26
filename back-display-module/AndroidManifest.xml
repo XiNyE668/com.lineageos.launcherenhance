@@ -7,7 +7,7 @@
     <application
         android:allowBackup="false"
         android:directBootAware="true"
-        android:label="Back & Display Tweaks"
+        android:label="Back &amp; Display Tweaks"
         android:theme="@android:style/Theme.Material">
 
         <meta-data android:name="xposedmodule" android:value="true" />
