@@ -1,0 +1,186 @@
+name: Build Back Display Tweaks LOS23.2
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - back-display-tweaks-los23
+    paths:
+      - 'back-display-module/**'
+      - '.github/workflows/build-back-display-tweaks.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: back-display-tweaks-los23
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Resolve Android SDK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
+          test -n "$SDK"
+          if [ ! -f "$SDK/platforms/android-36/android.jar" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+          fi
+          BT="$(find "$SDK/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          test -x "$BT/aapt2"
+          test -x "$BT/d8"
+          test -x "$BT/zipalign"
+          test -x "$BT/apksigner"
+          echo "ANDROID_JAR=$SDK/platforms/android-36/android.jar" >> "$GITHUB_ENV"
+          echo "BT=$BT" >> "$GITHUB_ENV"
+
+      - name: Compile Xposed API stubs
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf build
+          mkdir -p build/stubs build/classes build/dex
+          javac -source 8 -target 8 -cp "$ANDROID_JAR" -d build/stubs \
+            $(find back-display-module/stubs -name '*.java' | sort)
+          jar cf build/xposed-stubs.jar -C build/stubs .
+
+      - name: Compile module
+        shell: bash
+        run: |
+          set -euxo pipefail
+          javac -source 8 -target 8 \
+            -cp "$ANDROID_JAR:build/xposed-stubs.jar" \
+            -d build/classes \
+            $(find back-display-module/src -name '*.java' | sort)
+          jar cf build/module.jar -C build/classes .
+          "$BT/d8" --min-api 30 --lib "$ANDROID_JAR" \
+            --classpath build/xposed-stubs.jar \
+            --output build/dex build/module.jar
+          test -s build/dex/classes.dex
+          python3 - <<'PY'
+          import hashlib,struct,zlib
+          d=open('build/dex/classes.dex','rb').read()
+          assert d.startswith(b'dex\n')
+          assert hashlib.sha1(d[32:]).digest()==d[12:32]
+          assert (zlib.adler32(d[12:])&0xffffffff)==struct.unpack_from('<I',d,8)[0]
+          assert b'com/xinye/backdisplay/ModuleHook' in d
+          assert b'de/robv/android/xposed/XposedBridge' in d
+          print('DEX OK', len(d))
+          PY
+
+      - name: Package APK with aapt2
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p build/emptyres
+          "$BT/aapt2" link \
+            -I "$ANDROID_JAR" \
+            --manifest back-display-module/AndroidManifest.xml \
+            -A back-display-module/assets \
+            --min-sdk-version 30 \
+            --target-sdk-version 36 \
+            --version-code 1 \
+            --version-name '1.0-test1' \
+            -o build/base.apk
+          (cd build/dex && zip -q -0 ../base.apk classes.dex)
+          unzip -t build/base.apk >/dev/null
+
+      - name: Zipalign and sign
+        shell: bash
+        run: |
+          set -euxo pipefail
+          "$BT/zipalign" -p -f 4 build/base.apk build/aligned.apk
+          "$BT/zipalign" -c -p 4 build/aligned.apk
+          base64 -d back-display-module/signing/backdisplay-test.p12.b64 > build/backdisplay-test.p12
+          "$BT/apksigner" sign \
+            --ks build/backdisplay-test.p12 \
+            --ks-type PKCS12 \
+            --ks-pass pass:backdisplay \
+            --ks-key-alias backdisplay \
+            --key-pass pass:backdisplay \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out build/Back-Display-Tweaks-LOS23.2-Test1.apk \
+            build/aligned.apk
+          "$BT/apksigner" verify --verbose --print-certs \
+            build/Back-Display-Tweaks-LOS23.2-Test1.apk | tee build/apksigner.txt
+          sha256sum build/Back-Display-Tweaks-LOS23.2-Test1.apk | tee build/SHA256.txt
+
+      - name: Static safety checks
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          import zipfile
+          p='build/Back-Display-Tweaks-LOS23.2-Test1.apk'
+          with zipfile.ZipFile(p) as z:
+              assert z.testzip() is None
+              assert z.read('assets/xposed_init').decode().strip() == 'com.xinye.backdisplay.ModuleHook'
+              assert z.read('classes.dex').startswith(b'dex\n')
+              dex=z.read('classes.dex')
+              for marker in [
+                  b'AutomaticBrightnessController',
+                  b'AutomaticBrightnessStrategy',
+                  b'DefaultCrossActivityBackAnimation',
+                  b'CrossTaskBackAnimation',
+                  b'BackPanelController',
+                  b'LauncherBackAnimationController',
+                  b'com.xinye.backdisplay.settings']:
+                  assert marker in dex, marker
+              forbidden=[b'killall',b'killProcess',b'sendSignal',b'/data/adb/modules']
+              for marker in forbidden:
+                  assert marker not in dex, marker
+              print('APK static safety checks OK')
+          PY
+          cat > build/NOTES.txt <<'EOF'
+          Back & Display Tweaks - LOS23.2 Test1
+
+          Scope:
+          - android (System Framework)
+          - com.android.systemui (System UI)
+          - com.android.launcher3 (Trebuchet)
+
+          Back:
+          - Default cross-activity target rect scale + commit duration
+          - Cross-task scale + commit duration
+          - Return-to-home scale + commit duration
+          - Optional SystemUI Back indicator scale
+          - No process-kill/restart behavior
+
+          Display:
+          - Auto brightness minimum floor, default 10%
+          - Applies only while auto brightness controller is ENABLED and display state is ON
+          - Doze/AOD excluded by display-state gate
+          - On OFF->ON auto-brightness transition, ambient sensor is re-armed once
+          - While ambient lux is invalid during warm-up, brightness floor is returned as fallback
+          - Two delayed AutomaticBrightnessController.update() passes at 250ms and 900ms
+
+          Safety:
+          - All class/method hooks are fail-soft
+          - No APatch/system file modification
+          - Stable test signing key is reused across future builds
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Back-Display-Tweaks-LOS23.2-Test1
+          path: |
+            build/Back-Display-Tweaks-LOS23.2-Test1.apk
+            build/SHA256.txt
+            build/apksigner.txt
+            build/NOTES.txt
+          if-no-files-found: error
+          retention-days: 30
