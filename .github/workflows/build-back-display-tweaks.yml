@@ -89,8 +89,8 @@ jobs:
             -A back-display-module/assets \
             --min-sdk-version 30 \
             --target-sdk-version 36 \
-            --version-code 2 \
-            --version-name '2.0-test1' \
+            --version-code 3 \
+            --version-name '2.1-test2' \
             -o build/base.apk
           (cd build/dex && zip -q -0 ../base.apk classes.dex)
           unzip -t build/base.apk >/dev/null
@@ -111,11 +111,11 @@ jobs:
             --v1-signing-enabled true \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
-            --out build/Back-Arrow-Brightness-LOS23.2-Test1.apk \
+            --out build/Back-Arrow-Brightness-LOS23.2-Test2.apk \
             build/aligned.apk
           "$BT/apksigner" verify --verbose --print-certs \
-            build/Back-Arrow-Brightness-LOS23.2-Test1.apk | tee build/apksigner.txt
-          sha256sum build/Back-Arrow-Brightness-LOS23.2-Test1.apk | tee build/SHA256.txt
+            build/Back-Arrow-Brightness-LOS23.2-Test2.apk | tee build/apksigner.txt
+          sha256sum build/Back-Arrow-Brightness-LOS23.2-Test2.apk | tee build/SHA256.txt
 
       - name: Static safety checks
         shell: bash
@@ -123,7 +123,7 @@ jobs:
           set -euxo pipefail
           python3 - <<'PY'
           import zipfile
-          p='build/Back-Arrow-Brightness-LOS23.2-Test1.apk'
+          p='build/Back-Arrow-Brightness-LOS23.2-Test2.apk'
           with zipfile.ZipFile(p) as z:
               assert z.testzip() is None
               assert z.read('assets/xposed_init').decode().strip() == 'com.xinye.backdisplay.ModuleHook'
@@ -133,11 +133,12 @@ jobs:
                   b'AutomaticBrightnessController',
                   b'BackPanelController',
                   b'updateArrowState',
+                  b'currentState',
+                  b'ENTRY',
                   b'show_back_arrow',
                   b'brightness_floor_enabled',
                   b'com.xinye.backdisplay.settings']:
                   assert marker in dex, marker
-              # This rebuilt module must not contain the previous predictive-back tuning paths.
               for marker in [
                   b'DefaultCrossActivityBackAnimation',
                   b'CrossTaskBackAnimation',
@@ -147,26 +148,26 @@ jobs:
               print('APK static safety checks OK')
           PY
           cat > build/NOTES.txt <<'EOF'
-          Back Arrow & Brightness - LOS23.2 Test1
+          Back Arrow & Brightness - LOS23.2 Test2
 
           Scope:
           - android (System Framework)
           - com.android.systemui (System UI)
           - NO Trebuchet scope
 
-          Back gesture:
-          - Implements crDroid's "Allow to hide arrow for back gesture" behavior for stock LineageOS 23.2.
-          - Default: Back arrow/capsule HIDDEN.
-          - Optional app switch can show it again.
-          - Hides BackPanel View only; Back gesture and predictive-back dispatch continue normally.
-          - No Cross-Activity/Cross-Task/Return-to-Home animation tuning.
+          Back Arrow:
+          - Matches crDroid's semantic change at BackPanelController GestureState.ENTRY.
+          - Default switch: OFF.
+          - OFF: only when currentState == ENTRY, BackPanel mView is kept GONE.
+          - ON: module does nothing to BackPanel visibility; stock LineageOS behavior is restored.
+          - Gesture state machine, Back callbacks, Predictive Back, Cross-Activity/Cross-Task and launcher transitions are untouched.
 
           Display:
           - Automatic-brightness minimum floor, default 10%, adjustable 1-30%.
           - Floor applies only while AutomaticBrightnessController is ENABLED and display is STATE_ON.
           - Doze/AOD excluded.
-          - On non-ON -> ON transition with auto brightness enabled, ALS is re-armed once.
-          - Fresh AutomaticBrightnessController.update() passes are scheduled at 250ms and 900ms.
+          - On non-ON -> ON with auto brightness enabled, ALS is re-armed once.
+          - AutomaticBrightnessController.update() is requested at 250ms and 900ms after re-arm.
 
           Safety:
           - No process kill/restart behavior.
@@ -177,9 +178,9 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Back-Arrow-Brightness-LOS23.2-Test1
+          name: Back-Arrow-Brightness-LOS23.2-Test2
           path: |
-            build/Back-Arrow-Brightness-LOS23.2-Test1.apk
+            build/Back-Arrow-Brightness-LOS23.2-Test2.apk
             build/SHA256.txt
             build/apksigner.txt
             build/NOTES.txt
