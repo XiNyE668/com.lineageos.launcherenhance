@@ -33,23 +33,23 @@ public final class MainActivity extends Activity {
                 "LineageOS 23.2 / Android 16\nLSPosed scopes: System UI + System Framework",
                 14, false));
 
-        section(root, "Back Gesture");
-        addSwitch(root, "Show Back gesture arrow / capsule", "show_back_arrow", false);
+        section(root, "Back Arrow");
+        addSwitch(root, "Show Back gesture arrow", "show_back_arrow", false);
         root.addView(text(
-                "OFF hides the complete SystemUI BackPanel (arrow + pill/capsule background) while the Back gesture itself continues to work. This matches crDroid's 'Allow to hide arrow for back gesture' behavior.",
+                "Default: OFF\n\nOFF → when BackPanelController enters ENTRY, the arrow/capsule stays hidden.\nON → no visibility override is applied; LineageOS uses its completely stock BackPanel behavior.\n\nThis does not alter the Back gesture, Predictive Back, Activity/Task transitions, or launcher animations.",
                 13, false));
 
         section(root, "Display");
-        addSwitch(root, "Minimum auto-brightness floor", "brightness_floor_enabled", true);
+        addSwitch(root, "Minimum auto-brightness", "brightness_floor_enabled", true);
         addSeek(root, "Minimum brightness", "brightness_floor", 1, 30, 10, "%");
-        addSwitch(root, "Refresh ambient light on screen-on", "wake_refresh", true);
+        addSwitch(root, "Refresh auto brightness on wake", "wake_refresh", true);
         root.addView(text(
-                "The floor is used only when automatic brightness is active and the display is ON. Doze/AOD are not changed. On screen-on, the ambient-light sensor is re-armed once so a stale very-low value does not remain stuck.",
+                "The minimum is enforced only while automatic brightness is active and the display is ON. Doze/AOD are excluded. When the display turns on, the ambient-light sensor is re-armed once so automatic brightness can recover from a stale very-low value.",
                 13, false));
 
         section(root, "Safety");
         root.addView(text(
-                "No Predictive Back window animation tuning, no Trebuchet hook, no process kill, and no APatch/system-file modification. Missing methods are skipped instead of aborting SystemUI or system_server.",
+                "No Cross-Activity/Cross-Task/Return-to-Home animation hooks. No Trebuchet scope. No process kill or APatch/system-file modification. Missing LineageOS methods are skipped.",
                 13, false));
 
         setContentView(scroll);
