@@ -28,30 +28,28 @@ public final class MainActivity extends Activity {
         scroll.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        TextView title = text("Back & Display Tweaks", 24, true);
-        root.addView(title);
-        root.addView(text("LineageOS 23.2 / Android 16\nLSPosed scopes: System Framework + System UI + Trebuchet", 14, false));
+        root.addView(text("Back Arrow & Brightness", 24, true));
+        root.addView(text(
+                "LineageOS 23.2 / Android 16\nLSPosed scopes: System UI + System Framework",
+                14, false));
 
-        section(root, "Back Animation");
-        addSwitch(root, "Enable predictive Back tuning", "back_enabled", true);
-        addSeek(root, "Cross-activity end scale", "activity_scale", 84, 96, 90, "%");
-        addSeek(root, "Cross-task end scale", "task_scale", 74, 94, 84, "%");
-        addSeek(root, "Return-to-home end scale", "home_scale", 70, 94, 82, "%");
-        addSeek(root, "Commit animation duration", "back_duration", 250, 650, 420, " ms");
-        addSeek(root, "SystemUI Back indicator scale", "edge_scale", 80, 120, 100, "%");
+        section(root, "Back Gesture");
+        addSwitch(root, "Show Back gesture arrow / capsule", "show_back_arrow", false);
+        root.addView(text(
+                "OFF hides the complete SystemUI BackPanel (arrow + pill/capsule background) while the Back gesture itself continues to work. This matches crDroid's 'Allow to hide arrow for back gesture' behavior.",
+                13, false));
 
         section(root, "Display");
-        addSwitch(root, "Minimum auto-brightness floor", "brightness_enabled", true);
+        addSwitch(root, "Minimum auto-brightness floor", "brightness_floor_enabled", true);
         addSeek(root, "Minimum brightness", "brightness_floor", 1, 30, 10, "%");
         addSwitch(root, "Refresh ambient light on screen-on", "wake_refresh", true);
         root.addView(text(
-                "The brightness floor is applied only while auto brightness is active and the display is ON. " +
-                "Doze/AOD are excluded. On wake, the ambient-light sensor state is re-armed once; until valid lux arrives, the floor is used as the temporary fallback.",
+                "The floor is used only when automatic brightness is active and the display is ON. Doze/AOD are not changed. On screen-on, the ambient-light sensor is re-armed once so a stale very-low value does not remain stuck.",
                 13, false));
 
         section(root, "Safety");
         root.addView(text(
-                "All hooks are fail-soft: missing LineageOS methods are logged and skipped. The module does not kill SystemUI, Trebuchet, or system_server and does not require APatch files.",
+                "No Predictive Back window animation tuning, no Trebuchet hook, no process kill, and no APatch/system-file modification. Missing methods are skipped instead of aborting SystemUI or system_server.",
                 13, false));
 
         setContentView(scroll);
