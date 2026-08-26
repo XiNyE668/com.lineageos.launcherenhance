@@ -62,7 +62,6 @@ jobs:
           cp "$APK" "$OUT"
           sha256sum "$OUT" | tee SHA256.txt
 
-          # DEX-level architecture checks: provider-layer path present; dangerous restart paths absent.
           unzip -p "$APK" classes.dex > /tmp/classes.dex || true
           unzip -p "$APK" classes2.dex > /tmp/classes2.dex || true
           unzip -p "$APK" classes3.dex > /tmp/classes3.dex || true
