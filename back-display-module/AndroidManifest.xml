@@ -13,9 +13,10 @@
         <meta-data android:name="xposedmodule" android:value="true" />
         <meta-data android:name="xposeddescription" android:value="crDroid-style Back gesture arrow toggle and automatic-brightness floor for LineageOS 23.2" />
         <meta-data android:name="xposedminversion" android:value="93" />
-        <!-- Legacy Xposed scope names are historically inverted by LSPosed:
-             "system" maps to Android package "android" (System Framework). -->
-        <meta-data android:name="xposedscope" android:value="system;com.android.systemui" />
+        <!-- LSPosed legacy scope names are inverted when read by the manager:
+             declaring "android" here is translated to the synthetic "system" scope,
+             which LSPosed displays as System Framework. -->
+        <meta-data android:name="xposedscope" android:value="android;com.android.systemui" />
 
         <activity
             android:name=".MainActivity"
