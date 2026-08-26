@@ -146,7 +146,9 @@ def add_app_restart(block):
         r'\1invoke-static {}, Lcom/hhvvg/launcher/compat/RootRestart;->schedule()V\n\n\1return-void',
         block,
     )
-    if count != 1:
+    # AIDL proxy methods may have one return after transact plus another default-impl return.
+    # Both are successful exit paths; instrumenting each is correct because only one path runs.
+    if count < 1 or count > 3:
         raise RuntimeError(f'proxy setter return count={count}')
     return new
 
