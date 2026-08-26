@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.xinye.backdisplay">
+
+    <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="36" />
+
+    <application
+        android:allowBackup="false"
+        android:directBootAware="true"
+        android:label="Back & Display Tweaks"
+        android:theme="@android:style/Theme.Material">
+
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription" android:value="LineageOS 23.2 predictive Back animation and auto-brightness fixes" />
+        <meta-data android:name="xposedminversion" android:value="93" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name=".SettingsProvider"
+            android:authorities="com.xinye.backdisplay.settings"
+            android:directBootAware="true"
+            android:exported="true" />
+    </application>
+</manifest>
