@@ -1,0 +1,130 @@
+name: Build Launcher3Customizer LOS23.2
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - launcher3customizer-los23-build
+    paths:
+      - 'los23-build/**'
+      - '.github/workflows/build-launcher3customizer-los23.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: launcher3customizer-los23-build
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Resolve Android build tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
+          test -n "$SDK"
+          if ! ls "$SDK"/build-tools/*/d8 >/dev/null 2>&1; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" 'build-tools;36.0.0'
+          fi
+          BT="$(find "$SDK/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          test -x "$BT/d8"
+          test -x "$BT/zipalign"
+          test -x "$BT/apksigner"
+          echo "BT=$BT" >> "$GITHUB_ENV"
+
+      - name: Compile LOS23.2 hook with javac + D8
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf build
+          mkdir -p build/stubs build/classes build/dex
+          javac -source 8 -target 8 -d build/stubs $(find los23-build/stubs -name '*.java' | sort)
+          jar cf build/xposed-stubs.jar -C build/stubs .
+          javac -source 8 -target 8 -cp build/xposed-stubs.jar -d build/classes $(find los23-build/src -name '*.java' | sort)
+          jar cf build/compat.jar -C build/classes .
+          "$BT/d8" --min-api 30 --classpath build/xposed-stubs.jar --output build/dex build/compat.jar
+          test -s build/dex/classes.dex
+          python3 - <<'PY'
+          import hashlib,struct,zlib
+          p='build/dex/classes.dex'; d=open(p,'rb').read()
+          assert d.startswith(b'dex\n')
+          assert hashlib.sha1(d[32:]).digest()==d[12:32]
+          assert (zlib.adler32(d[12:])&0xffffffff)==struct.unpack_from('<I',d,8)[0]
+          print('compiled dex bytes:',len(d))
+          PY
+
+      - name: Download original Launcher3Customizer 1.0.1
+        shell: bash
+        run: |
+          set -euxo pipefail
+          curl -L --fail --retry 4 --retry-delay 2 \
+            'https://github.com/Xposed-Modules-Repo/com.hhvvg.launcher3customizer/releases/download/5-1.0.1/Launcher3Customizer-1.0.1-release.apk' \
+            -o build/original.apk
+          test -s build/original.apk
+          unzip -t build/original.apk >/dev/null
+
+      - name: Patch original APK
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 los23-build/tools/patch_apk.py \
+            build/original.apk build/dex/classes.dex build/unsigned-unaligned.apk
+          unzip -t build/unsigned-unaligned.apk >/dev/null
+
+      - name: Zipalign and sign with official Android tools
+        shell: bash
+        run: |
+          set -euxo pipefail
+          "$BT/zipalign" -p -f 4 build/unsigned-unaligned.apk build/aligned.apk
+          "$BT/zipalign" -c -p 4 build/aligned.apk
+          keytool -genkeypair -noprompt \
+            -keystore build/los23-test.jks -storepass launcher3customizer -keypass launcher3customizer \
+            -alias los23test -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname 'CN=Launcher3Customizer LOS23 Test,O=Open Source Test,C=US'
+          "$BT/apksigner" sign \
+            --ks build/los23-test.jks --ks-pass pass:launcher3customizer \
+            --ks-key-alias los23test --key-pass pass:launcher3customizer \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --out build/Launcher3Customizer-LOS23.2-Full-Test.apk build/aligned.apk
+          "$BT/apksigner" verify --verbose --print-certs build/Launcher3Customizer-LOS23.2-Full-Test.apk | tee build/apksigner-verify.txt
+          sha256sum build/Launcher3Customizer-LOS23.2-Full-Test.apk | tee build/Launcher3Customizer-LOS23.2-Full-Test-SHA256.txt
+
+      - name: Static payload checks
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          import zipfile
+          p='build/Launcher3Customizer-LOS23.2-Full-Test.apk'
+          with zipfile.ZipFile(p) as z:
+              assert z.testzip() is None
+              assert z.read('assets/xposed_init').decode().strip().splitlines()==[
+                  'com.hhvvg.launcher.Init',
+                  'com.hhvvg.launcher.compat.Los23CompatHook']
+              for n in ('classes.dex','classes2.dex','classes3.dex','resources.arsc'):
+                  assert z.getinfo(n).compress_type==zipfile.ZIP_STORED, (n,z.getinfo(n).compress_type)
+              assert b'Los23CompatHook' in z.read('classes3.dex')
+              print('APK payload OK; entries:',len(z.infolist()))
+          PY
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Launcher3Customizer-LOS23.2-Full-Test
+          path: |
+            build/Launcher3Customizer-LOS23.2-Full-Test.apk
+            build/Launcher3Customizer-LOS23.2-Full-Test-SHA256.txt
+            build/apksigner-verify.txt
+          if-no-files-found: error
+          retention-days: 30
