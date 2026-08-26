@@ -19,11 +19,11 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 /**
- * LineageOS 23.2 / Android 16 module with two deliberately narrow features:
+ * LineageOS 23.2 / Android 16 module with two narrow features:
  *  1) crDroid-style Back gesture arrow/capsule visibility toggle.
- *  2) Automatic-brightness minimum floor + one-shot ALS refresh when the screen turns on.
+ *  2) Automatic-brightness minimum floor + one-shot ALS refresh on screen-on.
  *
- * No predictive-back window animation tuning is performed here.
+ * No predictive-back window animation tuning is performed.
  */
 public final class ModuleHook implements IXposedHookLoadPackage {
     private static final String TAG = "BackArrowBrightness/LOS23";
@@ -49,10 +49,15 @@ public final class ModuleHook implements IXposedHookLoadPackage {
     }
 
     /**
-     * Mirrors crDroid's implementation conceptually:
-     * BackPanelController keeps processing the gesture, but its BackPanel view is GONE when
-     * the user disables the arrow. This hides both the arrow and its pill/capsule background
-     * without disabling Back navigation or predictive-back dispatch.
+     * LineageOS 23.2 currently does this in BackPanelController.updateArrowState():
+     *   GestureState.ENTRY -> mView.isVisible = true
+     *
+     * crDroid changes only that assignment to:
+     *   mView.isVisible = backArrowVisibility
+     *
+     * We reproduce that exact semantic point with LSPosed: after the stock ENTRY branch runs,
+     * if the user selected OFF, only the BackPanel view is made GONE. For every non-ENTRY state,
+     * and whenever the switch is ON, we do absolutely nothing to the stock controller.
      */
     private static void hookBackArrow(ClassLoader cl) {
         Class<?> controller = XposedHelpers.findClassIfExists(
@@ -67,7 +72,12 @@ public final class ModuleHook implements IXposedHookLoadPackage {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
                 try {
-                    if (config().showBackArrow) return;
+                    Config c = config();
+                    if (c.showBackArrow) return; // ON = 100% stock LineageOS behavior.
+
+                    Object state = XposedHelpers.getObjectField(param.thisObject, "currentState");
+                    if (state == null || !"ENTRY".equals(String.valueOf(state))) return;
+
                     Object panel = XposedHelpers.getObjectField(param.thisObject, "mView");
                     if (panel instanceof View) {
                         ((View) panel).setVisibility(View.GONE);
@@ -75,12 +85,12 @@ public final class ModuleHook implements IXposedHookLoadPackage {
                         XposedHelpers.callMethod(panel, "setVisibility", View.GONE);
                     }
                 } catch (Throwable t) {
-                    log("hide BackPanel", t);
+                    log("BackPanel ENTRY visibility", t);
                 }
             }
         });
 
-        XposedBridge.log(TAG + ": crDroid-style Back arrow visibility hook registered");
+        XposedBridge.log(TAG + ": exact ENTRY-gated Back arrow visibility hook registered");
     }
 
     private static void hookBrightness(ClassLoader cl) {
@@ -94,7 +104,6 @@ public final class ModuleHook implements IXposedHookLoadPackage {
         XposedBridge.hookAllConstructors(abc, cacheContextHook());
 
         // Apply the floor at the source of Android's automatic-brightness recommendation.
-        // This covers both AutomaticBrightnessStrategy and AutomaticBrightnessStrategy2 callers.
         XposedBridge.hookAllMethods(abc, "getAutomaticScreenBrightness", new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
@@ -120,7 +129,7 @@ public final class ModuleHook implements IXposedHookLoadPackage {
             }
         });
 
-        // Track OFF/DOZE -> ON transition. We re-arm the ALS only once per transition.
+        // Re-arm ALS once when AutomaticBrightnessController transitions from non-ON to ON.
         XposedBridge.hookAllMethods(abc, "configure", new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) {
@@ -187,7 +196,7 @@ public final class ModuleHook implements IXposedHookLoadPackage {
             log("ALS disable", t);
         }
 
-        // Float.NaN is Android's BRIGHTNESS_INVALID_FLOAT value; the public SDK hides the constant.
+        // Float.NaN is Android's hidden BRIGHTNESS_INVALID_FLOAT sentinel.
         try { XposedHelpers.setBooleanField(controller, "mAmbientLuxValid", false); }
         catch (Throwable ignored) {}
         try { XposedHelpers.setFloatField(controller, "mScreenAutoBrightness", Float.NaN); }
@@ -264,8 +273,7 @@ public final class ModuleHook implements IXposedHookLoadPackage {
             Bundle bundle = context.getContentResolver().call(SETTINGS_URI, "get", null, null);
             if (bundle != null) sConfig = Config.from(bundle);
         } catch (Throwable ignored) {
-            // Provider may not be available during very early boot. Safe defaults remain active and
-            // the next gesture/brightness evaluation retries the read.
+            // Provider can be unavailable during very early boot; safe defaults remain active.
         }
     }
 
@@ -300,7 +308,6 @@ public final class ModuleHook implements IXposedHookLoadPackage {
         }
 
         static Config defaults() {
-            // Requested default: hide the Back arrow/capsule; keep a 10% auto-brightness floor.
             return new Config(false, true, 0.10f, true);
         }
 
