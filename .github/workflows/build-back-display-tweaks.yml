@@ -79,7 +79,7 @@ jobs:
           print('DEX OK', len(d))
           PY
 
-      - name: Package APK with aapt2
+      - name: Package APK
         shell: bash
         run: |
           set -euxo pipefail
@@ -89,8 +89,8 @@ jobs:
             -A back-display-module/assets \
             --min-sdk-version 30 \
             --target-sdk-version 36 \
-            --version-code 3 \
-            --version-name '2.1-test2' \
+            --version-code 4 \
+            --version-name '1.0' \
             -o build/base.apk
           (cd build/dex && zip -q -0 ../base.apk classes.dex)
           unzip -t build/base.apk >/dev/null
@@ -111,19 +111,20 @@ jobs:
             --v1-signing-enabled true \
             --v2-signing-enabled true \
             --v3-signing-enabled true \
-            --out build/Back-Arrow-Brightness-LOS23.2-Test2.apk \
+            --out build/Back-Arrow-Brightness-LOS23.2-v1.0-Release.apk \
             build/aligned.apk
           "$BT/apksigner" verify --verbose --print-certs \
-            build/Back-Arrow-Brightness-LOS23.2-Test2.apk | tee build/apksigner.txt
-          sha256sum build/Back-Arrow-Brightness-LOS23.2-Test2.apk | tee build/SHA256.txt
+            build/Back-Arrow-Brightness-LOS23.2-v1.0-Release.apk | tee build/apksigner.txt
+          sha256sum build/Back-Arrow-Brightness-LOS23.2-v1.0-Release.apk | tee build/SHA256.txt
 
-      - name: Static safety checks
+      - name: Release verification
         shell: bash
         run: |
           set -euxo pipefail
+          APK=build/Back-Arrow-Brightness-LOS23.2-v1.0-Release.apk
           python3 - <<'PY'
           import zipfile
-          p='build/Back-Arrow-Brightness-LOS23.2-Test2.apk'
+          p='build/Back-Arrow-Brightness-LOS23.2-v1.0-Release.apk'
           with zipfile.ZipFile(p) as z:
               assert z.testzip() is None
               assert z.read('assets/xposed_init').decode().strip() == 'com.xinye.backdisplay.ModuleHook'
@@ -145,44 +146,55 @@ jobs:
                   b'LauncherBackAnimationController',
                   b'killall', b'killProcess', b'sendSignal', b'/data/adb/modules']:
                   assert marker not in dex, marker
-              print('APK static safety checks OK')
+              print('APK/Dex safety checks OK')
           PY
+          grep -q 'android:name="xposedscope"' back-display-module/AndroidManifest.xml
+          grep -q 'android:value="system;com.android.systemui"' back-display-module/AndroidManifest.xml
+          "$BT/aapt2" dump badging "$APK" | tee build/badging.txt
+          grep -q "versionCode='4'" build/badging.txt
+          grep -q "versionName='1.0'" build/badging.txt
           cat > build/NOTES.txt <<'EOF'
-          Back Arrow & Brightness - LOS23.2 Test2
+          Back Arrow & Brightness - LOS23.2 v1.0 Release
 
-          Scope:
-          - android (System Framework)
-          - com.android.systemui (System UI)
-          - NO Trebuchet scope
+          Recommended LSPosed scopes:
+          - System Framework (package android)
+          - System UI (package com.android.systemui)
+          - Trebuchet is NOT required
+
+          LSPosed legacy scope declaration:
+          - AndroidManifest meta-data: xposedscope="system;com.android.systemui"
+          - LSPosed intentionally maps legacy "system" to package "android" for historical compatibility.
 
           Back Arrow:
-          - Matches crDroid's semantic change at BackPanelController GestureState.ENTRY.
-          - Default switch: OFF.
-          - OFF: only when currentState == ENTRY, BackPanel mView is kept GONE.
-          - ON: module does nothing to BackPanel visibility; stock LineageOS behavior is restored.
-          - Gesture state machine, Back callbacks, Predictive Back, Cross-Activity/Cross-Task and launcher transitions are untouched.
+          - crDroid-equivalent visibility semantics at BackPanelController GestureState.ENTRY.
+          - Default: Show Back gesture arrow = OFF.
+          - OFF: only ENTRY visibility is overridden to GONE.
+          - ON: module does not alter BackPanel visibility; stock LineageOS behavior is used.
+          - Gesture state machine, Predictive Back, cross-activity/cross-task and launcher transitions are untouched.
 
           Display:
-          - Automatic-brightness minimum floor, default 10%, adjustable 1-30%.
-          - Floor applies only while AutomaticBrightnessController is ENABLED and display is STATE_ON.
+          - Automatic-brightness minimum floor: ON by default.
+          - Default floor: 10%; adjustable 1-30%.
+          - Applied only with auto brightness enabled and display STATE_ON.
           - Doze/AOD excluded.
-          - On non-ON -> ON with auto brightness enabled, ALS is re-armed once.
-          - AutomaticBrightnessController.update() is requested at 250ms and 900ms after re-arm.
+          - Wake refresh re-arms ALS once on non-ON -> ON and requests updates at 250 ms and 900 ms.
 
           Safety:
           - No process kill/restart behavior.
           - No APatch/system-file modification.
+          - No Trebuchet hook.
           - Hooks are fail-soft.
           EOF
 
-      - name: Upload artifact
+      - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Back-Arrow-Brightness-LOS23.2-Test2
+          name: Back-Arrow-Brightness-LOS23.2-v1.0-Release
           path: |
-            build/Back-Arrow-Brightness-LOS23.2-Test2.apk
+            build/Back-Arrow-Brightness-LOS23.2-v1.0-Release.apk
             build/SHA256.txt
             build/apksigner.txt
+            build/badging.txt
             build/NOTES.txt
           if-no-files-found: error
           retention-days: 30
