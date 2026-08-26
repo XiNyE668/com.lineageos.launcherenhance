@@ -1,14 +1,13 @@
 package com.xinye.backdisplay;
 
-import android.animation.ValueAnimator;
 import android.content.Context;
-import android.graphics.Rect;
-import android.graphics.RectF;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.view.Display;
+import android.view.View;
 
 import java.util.Collections;
 import java.util.Map;
@@ -20,14 +19,22 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
+/**
+ * LineageOS 23.2 / Android 16 module with two deliberately narrow features:
+ *  1) crDroid-style Back gesture arrow/capsule visibility toggle.
+ *  2) Automatic-brightness minimum floor + one-shot ALS refresh when the screen turns on.
+ *
+ * No predictive-back window animation tuning is performed here.
+ */
 public final class ModuleHook implements IXposedHookLoadPackage {
-    private static final String TAG = "BackDisplay/LOS23";
+    private static final String TAG = "BackArrowBrightness/LOS23";
     private static final Uri SETTINGS_URI = Uri.parse("content://com.xinye.backdisplay.settings");
-    private static final long SETTINGS_TTL_MS = 1500L;
+    private static final long SETTINGS_TTL_MS = 300L;
 
     private static volatile Context sContext;
     private static volatile Config sConfig = Config.defaults();
     private static volatile long sConfigAt;
+
     private static final Map<Object, Integer> OLD_DISPLAY_STATES =
             Collections.synchronizedMap(new WeakHashMap<Object, Integer>());
 
@@ -36,218 +43,170 @@ public final class ModuleHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) {
         if ("com.android.systemui".equals(lpparam.packageName)) {
-            safe("SystemUI Back", () -> hookSystemUiBack(lpparam.classLoader));
-        } else if ("com.android.launcher3".equals(lpparam.packageName)) {
-            safe("Trebuchet Back", () -> hookLauncherBack(lpparam.classLoader));
+            safe("SystemUI Back arrow", () -> hookBackArrow(lpparam.classLoader));
         } else if ("android".equals(lpparam.packageName)) {
             safe("Automatic brightness", () -> hookBrightness(lpparam.classLoader));
         }
     }
 
-    private static void hookSystemUiBack(ClassLoader cl) {
-        Class<?> defaultCross = XposedHelpers.findClassIfExists(
-                "com.android.wm.shell.back.DefaultCrossActivityBackAnimation", cl);
-        if (defaultCross != null) {
-            XposedBridge.hookAllConstructors(defaultCross, cacheContextHook());
-            XposedBridge.hookAllMethods(defaultCross,
-                    "preparePreCommitClosingRectMovement", new XC_MethodHook() {
-                        @Override protected void afterHookedMethod(MethodHookParam p) {
-                            try {
-                                Config c = config();
-                                if (!c.backEnabled) return;
-                                RectF start = (RectF) XposedHelpers.getObjectField(
-                                        p.thisObject, "startClosingRect");
-                                RectF target = (RectF) XposedHelpers.getObjectField(
-                                        p.thisObject, "targetClosingRect");
-                                rescaleAroundCurrentCenter(target, start, c.activityScale);
-                            } catch (Throwable t) { log("cross-activity closing", t); }
-                        }
-                    });
-            XposedBridge.hookAllMethods(defaultCross,
-                    "preparePreCommitEnteringRectMovement", new XC_MethodHook() {
-                        @Override protected void afterHookedMethod(MethodHookParam p) {
-                            try {
-                                Config c = config();
-                                if (!c.backEnabled) return;
-                                RectF start = (RectF) XposedHelpers.getObjectField(
-                                        p.thisObject, "startEnteringRect");
-                                RectF target = (RectF) XposedHelpers.getObjectField(
-                                        p.thisObject, "targetEnteringRect");
-                                rescaleAroundCurrentCenter(target, start, c.activityScale);
-                            } catch (Throwable t) { log("cross-activity entering", t); }
-                        }
-                    });
-            XposedBridge.hookAllMethods(defaultCross,
-                    "getPostCommitAnimationDuration", new XC_MethodHook() {
-                        @Override protected void afterHookedMethod(MethodHookParam p) {
-                            Config c = config();
-                            if (c.backEnabled) p.setResult((long) c.durationMs);
-                        }
-                    });
-        }
-
-        Class<?> crossTask = XposedHelpers.findClassIfExists(
-                "com.android.wm.shell.back.CrossTaskBackAnimation", cl);
-        if (crossTask != null) {
-            XposedBridge.hookAllConstructors(crossTask, cacheContextHook());
-            XposedBridge.hookAllMethods(crossTask, "mapRange", new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam p) {
-                    try {
-                        Config c = config();
-                        if (!c.backEnabled || p.args.length != 3) return;
-                        float min = ((Number) p.args[1]).floatValue();
-                        float max = ((Number) p.args[2]).floatValue();
-                        if (near(min, 1f) && near(max, 0.8f)) {
-                            p.args[2] = Float.valueOf(c.taskScale);
-                        }
-                    } catch (Throwable t) { log("cross-task scale", t); }
-                }
-            });
-        }
-
-        Class<?> backPanel = XposedHelpers.findClassIfExists(
+    /**
+     * Mirrors crDroid's implementation conceptually:
+     * BackPanelController keeps processing the gesture, but its BackPanel view is GONE when
+     * the user disables the arrow. This hides both the arrow and its pill/capsule background
+     * without disabling Back navigation or predictive-back dispatch.
+     */
+    private static void hookBackArrow(ClassLoader cl) {
+        Class<?> controller = XposedHelpers.findClassIfExists(
                 "com.android.systemui.navigationbar.gestural.BackPanelController", cl);
-        if (backPanel != null) {
-            XposedBridge.hookAllConstructors(backPanel, cacheContextHook());
-            XposedBridge.hookAllMethods(backPanel, "updateArrowState", new XC_MethodHook() {
-                @Override protected void afterHookedMethod(MethodHookParam p) {
-                    try {
-                        Config c = config();
-                        if (!c.backEnabled || near(c.edgeScale, 1f)) return;
-                        Object view = XposedHelpers.getObjectField(p.thisObject, "mView");
-                        XposedHelpers.callMethod(view, "setScaleX", c.edgeScale);
-                        XposedHelpers.callMethod(view, "setScaleY", c.edgeScale);
-                    } catch (Throwable t) { log("BackPanel scale", t); }
-                }
-            });
+        if (controller == null) {
+            XposedBridge.log(TAG + ": BackPanelController not found; Back arrow hook skipped");
+            return;
         }
 
-        hookDurationAnimator("com.android.wm.shell.back.CrossTaskBackAnimation");
-        XposedBridge.log(TAG + ": SystemUI Back hooks registered");
-    }
-
-    private static void hookLauncherBack(ClassLoader cl) {
-        Class<?> launcherBack = XposedHelpers.findClassIfExists(
-                "com.android.quickstep.LauncherBackAnimationController", cl);
-        if (launcherBack == null) return;
-        XposedBridge.hookAllConstructors(launcherBack, cacheContextHook());
-        XposedBridge.hookAllMethods(launcherBack, "updateBackProgress", new XC_MethodHook() {
-            @Override protected void afterHookedMethod(MethodHookParam p) {
+        XposedBridge.hookAllConstructors(controller, cacheContextHook());
+        XposedBridge.hookAllMethods(controller, "updateArrowState", new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
                 try {
-                    Config c = config();
-                    if (!c.backEnabled || p.args.length < 1) return;
-                    float progress = ((Number) p.args[0]).floatValue();
-                    progress = clamp(progress, 0f, 1f);
-                    Rect start = (Rect) XposedHelpers.getObjectField(p.thisObject, "mStartRect");
-                    RectF current = (RectF) XposedHelpers.getObjectField(p.thisObject, "mCurrentRect");
-                    if (start.width() <= 0 || start.height() <= 0) return;
-                    float cx = current.centerX();
-                    float cy = current.centerY();
-                    float scale = 1f + (c.homeScale - 1f) * progress;
-                    float w = start.width() * scale;
-                    float h = start.height() * scale;
-                    current.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f);
-                    float cr0 = XposedHelpers.getFloatField(
-                            p.thisObject, "mWindowScaleStartCornerRadius");
-                    float cr1 = XposedHelpers.getFloatField(
-                            p.thisObject, "mWindowScaleEndCornerRadius");
-                    float radius = cr0 + (cr1 - cr0) * progress;
-                    XposedHelpers.callMethod(p.thisObject, "applyTransform", current, radius);
-                } catch (Throwable t) { log("return-home progress", t); }
+                    if (config().showBackArrow) return;
+                    Object panel = XposedHelpers.getObjectField(param.thisObject, "mView");
+                    if (panel instanceof View) {
+                        ((View) panel).setVisibility(View.GONE);
+                    } else if (panel != null) {
+                        XposedHelpers.callMethod(panel, "setVisibility", View.GONE);
+                    }
+                } catch (Throwable t) {
+                    log("hide BackPanel", t);
+                }
             }
         });
-        hookDurationAnimator("com.android.quickstep.LauncherBackAnimationController");
-        XposedBridge.log(TAG + ": Trebuchet return-home hooks registered");
-    }
 
-    private static void hookDurationAnimator(final String ownerClass) {
-        XposedBridge.hookAllMethods(ValueAnimator.class, "setDuration", new XC_MethodHook() {
-            @Override protected void beforeHookedMethod(MethodHookParam p) {
-                try {
-                    Config c = config();
-                    if (!c.backEnabled || p.args.length == 0) return;
-                    long original = ((Number) p.args[0]).longValue();
-                    if (original < 300L) return;
-                    if (stackContains(ownerClass)) p.args[0] = Long.valueOf(c.durationMs);
-                } catch (Throwable t) { log("duration " + ownerClass, t); }
-            }
-        });
+        XposedBridge.log(TAG + ": crDroid-style Back arrow visibility hook registered");
     }
 
     private static void hookBrightness(ClassLoader cl) {
-        hookBrightnessStrategy(cl,
-                "com.android.server.display.brightness.strategy.AutomaticBrightnessStrategy");
-        hookBrightnessStrategy(cl,
-                "com.android.server.display.brightness.strategy.AutomaticBrightnessStrategy2");
-
-        Class<?> abc = XposedHelpers.findClassIfExists(
+        final Class<?> abc = XposedHelpers.findClassIfExists(
                 "com.android.server.display.AutomaticBrightnessController", cl);
-        if (abc != null) {
-            XposedBridge.hookAllMethods(abc, "configure", new XC_MethodHook() {
-                @Override protected void beforeHookedMethod(MethodHookParam p) {
-                    try {
-                        OLD_DISPLAY_STATES.put(p.thisObject,
-                                Integer.valueOf(XposedHelpers.getIntField(p.thisObject,
-                                        "mDisplayState")));
-                    } catch (Throwable ignored) {}
-                }
-
-                @Override protected void afterHookedMethod(MethodHookParam p) {
-                    try {
-                        Config c = config();
-                        if (!c.wakeRefresh || p.args.length < 8) return;
-                        int autoState = ((Number) p.args[0]).intValue();
-                        int displayState = ((Number) p.args[7]).intValue();
-                        Integer old = OLD_DISPLAY_STATES.remove(p.thisObject);
-                        if (autoState != 1 || displayState != Display.STATE_ON
-                                || (old != null && old.intValue() == Display.STATE_ON)) return;
-                        rearmAmbientSensor(p.thisObject);
-                    } catch (Throwable t) { log("wake ALS refresh", t); }
-                }
-            });
+        if (abc == null) {
+            XposedBridge.log(TAG + ": AutomaticBrightnessController not found; brightness hook skipped");
+            return;
         }
-        XposedBridge.log(TAG + ": brightness hooks registered");
+
+        XposedBridge.hookAllConstructors(abc, cacheContextHook());
+
+        // Apply the floor at the source of Android's automatic-brightness recommendation.
+        // This covers both AutomaticBrightnessStrategy and AutomaticBrightnessStrategy2 callers.
+        XposedBridge.hookAllMethods(abc, "getAutomaticScreenBrightness", new XC_MethodHook() {
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                try {
+                    Config c = config();
+                    if (!c.brightnessFloorEnabled) return;
+
+                    int autoState = XposedHelpers.getIntField(param.thisObject, "mState");
+                    int displayState = XposedHelpers.getIntField(param.thisObject, "mDisplayState");
+                    if (autoState != 1 || displayState != Display.STATE_ON) return;
+
+                    Object result = param.getResult();
+                    float value = result instanceof Number
+                            ? ((Number) result).floatValue()
+                            : PowerManager.BRIGHTNESS_INVALID_FLOAT;
+
+                    if (Float.isNaN(value)
+                            || value == PowerManager.BRIGHTNESS_INVALID_FLOAT
+                            || value < c.brightnessFloor) {
+                        param.setResult(Float.valueOf(c.brightnessFloor));
+                    }
+                } catch (Throwable t) {
+                    log("automatic brightness floor", t);
+                }
+            }
+        });
+
+        // Track OFF/DOZE -> ON transition. We re-arm the ALS only once per transition.
+        XposedBridge.hookAllMethods(abc, "configure", new XC_MethodHook() {
+            @Override
+            protected void beforeHookedMethod(MethodHookParam param) {
+                try {
+                    OLD_DISPLAY_STATES.put(param.thisObject,
+                            Integer.valueOf(XposedHelpers.getIntField(param.thisObject,
+                                    "mDisplayState")));
+                } catch (Throwable ignored) {
+                }
+            }
+
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                try {
+                    Config c = config();
+                    if (!c.wakeRefresh || param.args == null || param.args.length < 8) return;
+
+                    int autoState = ((Number) param.args[0]).intValue();
+                    int newDisplayState = ((Number) param.args[7]).intValue();
+                    Integer oldState = OLD_DISPLAY_STATES.remove(param.thisObject);
+
+                    if (autoState != 1 || newDisplayState != Display.STATE_ON) return;
+                    if (oldState != null && oldState.intValue() == Display.STATE_ON) return;
+
+                    scheduleAlsRearm(param.thisObject);
+                } catch (Throwable t) {
+                    log("screen-on ALS transition", t);
+                }
+            }
+        });
+
+        XposedBridge.log(TAG + ": brightness floor + wake ALS refresh hooks registered");
     }
 
-    private static void hookBrightnessStrategy(ClassLoader cl, String name) {
-        Class<?> strategy = XposedHelpers.findClassIfExists(name, cl);
-        if (strategy == null) return;
-        XposedBridge.hookAllConstructors(strategy, cacheContextHook());
-        XposedBridge.hookAllMethods(strategy, "getAutomaticScreenBrightness",
-                new XC_MethodHook() {
-                    @Override protected void afterHookedMethod(MethodHookParam p) {
-                        try {
-                            Config c = config();
-                            if (!c.brightnessEnabled) return;
-                            Object controller = XposedHelpers.getObjectField(
-                                    p.thisObject, "mAutomaticBrightnessController");
-                            if (controller == null) return;
-                            int state = XposedHelpers.getIntField(controller, "mState");
-                            int displayState = XposedHelpers.getIntField(
-                                    controller, "mDisplayState");
-                            if (state != 1 || displayState != Display.STATE_ON) return;
-                            Object result = p.getResult();
-                            float brightness = result instanceof Number
-                                    ? ((Number) result).floatValue() : Float.NaN;
-                            if (Float.isNaN(brightness) || brightness < c.brightnessFloor) {
-                                p.setResult(Float.valueOf(c.brightnessFloor));
-                            }
-                        } catch (Throwable t) { log("brightness floor", t); }
-                    }
-                });
+    private static void scheduleAlsRearm(final Object controller) {
+        try {
+            Object h = XposedHelpers.getObjectField(controller, "mHandler");
+            if (h instanceof Handler) {
+                ((Handler) h).postDelayed(() -> rearmAmbientSensor(controller), 120L);
+            } else {
+                rearmAmbientSensor(controller);
+            }
+        } catch (Throwable t) {
+            rearmAmbientSensor(controller);
+        }
     }
 
     private static void rearmAmbientSensor(final Object controller) {
-        try { XposedHelpers.callMethod(controller, "setLightSensorEnabled", false); }
-        catch (Throwable ignored) {}
+        Config c = config();
+        if (!c.wakeRefresh) return;
+
+        try {
+            int state = XposedHelpers.getIntField(controller, "mState");
+            int displayState = XposedHelpers.getIntField(controller, "mDisplayState");
+            if (state != 1 || displayState != Display.STATE_ON) return;
+        } catch (Throwable t) {
+            log("ALS state gate", t);
+            return;
+        }
+
+        try {
+            XposedHelpers.callMethod(controller, "setLightSensorEnabled", false);
+        } catch (Throwable t) {
+            log("ALS disable", t);
+        }
+
+        // Force the next light sample to establish a fresh ambient lux instead of keeping a stale
+        // screen-on value from the previous session.
         try { XposedHelpers.setBooleanField(controller, "mAmbientLuxValid", false); }
         catch (Throwable ignored) {}
-        try { XposedHelpers.setFloatField(controller, "mScreenAutoBrightness", Float.NaN); }
+        try { XposedHelpers.setFloatField(controller, "mScreenAutoBrightness",
+                PowerManager.BRIGHTNESS_INVALID_FLOAT); }
         catch (Throwable ignored) {}
-        try { XposedHelpers.setFloatField(controller, "mRawScreenAutoBrightness", Float.NaN); }
+        try { XposedHelpers.setFloatField(controller, "mRawScreenAutoBrightness",
+                PowerManager.BRIGHTNESS_INVALID_FLOAT); }
         catch (Throwable ignored) {}
-        try { XposedHelpers.callMethod(controller, "setLightSensorEnabled", true); }
-        catch (Throwable t) { log("ALS re-enable", t); }
+
+        try {
+            XposedHelpers.callMethod(controller, "setLightSensorEnabled", true);
+        } catch (Throwable t) {
+            log("ALS enable", t);
+        }
+
         try {
             Object h = XposedHelpers.getObjectField(controller, "mHandler");
             if (h instanceof Handler) {
@@ -257,21 +216,29 @@ public final class ModuleHook implements IXposedHookLoadPackage {
             } else {
                 safeCallUpdate(controller);
             }
-        } catch (Throwable t) { safeCallUpdate(controller); }
+        } catch (Throwable t) {
+            safeCallUpdate(controller);
+        }
     }
 
     private static void safeCallUpdate(Object controller) {
-        try { XposedHelpers.callMethod(controller, "update"); }
-        catch (Throwable t) { log("ABC update", t); }
+        try {
+            XposedHelpers.callMethod(controller, "update");
+        } catch (Throwable t) {
+            log("AutomaticBrightnessController.update", t);
+        }
     }
 
     private static XC_MethodHook cacheContextHook() {
         return new XC_MethodHook() {
-            @Override protected void afterHookedMethod(MethodHookParam p) {
-                Context c = findContext(p.args);
-                if (c == null && p.thisObject instanceof Context) c = (Context) p.thisObject;
-                if (c != null) {
-                    sContext = c;
+            @Override
+            protected void afterHookedMethod(MethodHookParam param) {
+                Context context = findContext(param.args);
+                if (context == null && param.thisObject instanceof Context) {
+                    context = (Context) param.thisObject;
+                }
+                if (context != null) {
+                    sContext = context;
                     refreshConfig(true);
                 }
             }
@@ -280,7 +247,9 @@ public final class ModuleHook implements IXposedHookLoadPackage {
 
     private static Context findContext(Object[] args) {
         if (args == null) return null;
-        for (Object o : args) if (o instanceof Context) return (Context) o;
+        for (Object arg : args) {
+            if (arg instanceof Context) return (Context) arg;
+        }
         return null;
     }
 
@@ -292,44 +261,30 @@ public final class ModuleHook implements IXposedHookLoadPackage {
     private static void refreshConfig(boolean force) {
         Context context = sContext;
         if (context == null) return;
+
         long now = SystemClock.uptimeMillis();
         if (!force && now - sConfigAt < SETTINGS_TTL_MS) return;
         sConfigAt = now;
+
         try {
-            Bundle b = context.getContentResolver().call(SETTINGS_URI, "get", null, null);
-            if (b != null) sConfig = Config.from(b);
+            Bundle bundle = context.getContentResolver().call(SETTINGS_URI, "get", null, null);
+            if (bundle != null) sConfig = Config.from(bundle);
+        } catch (Throwable ignored) {
+            // Provider may not be available during very early boot. Safe defaults remain active and
+            // the next gesture/brightness evaluation retries the read.
+        }
+    }
+
+    private static float clamp(float value, float min, float max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static void safe(String name, ThrowingRunnable runnable) {
+        try {
+            runnable.run();
         } catch (Throwable t) {
-            // During early system_server boot the module provider may not be ready yet.
-            // Keep safe defaults and retry on a later hook call.
+            XposedBridge.log(TAG + ": " + name + " skipped: " + t);
         }
-    }
-
-    private static void rescaleAroundCurrentCenter(RectF target, RectF start, float scale) {
-        if (target == null || start == null || start.width() <= 0f || start.height() <= 0f) return;
-        float cx = target.centerX();
-        float cy = target.centerY();
-        float w = start.width() * scale;
-        float h = start.height() * scale;
-        target.set(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f);
-    }
-
-    private static boolean stackContains(String className) {
-        StackTraceElement[] stack = Thread.currentThread().getStackTrace();
-        int max = Math.min(stack.length, 28);
-        for (int i = 0; i < max; i++) {
-            if (className.equals(stack[i].getClassName())) return true;
-        }
-        return false;
-    }
-
-    private static boolean near(float a, float b) { return Math.abs(a - b) < 0.001f; }
-    private static float clamp(float v, float lo, float hi) {
-        return Math.max(lo, Math.min(hi, v));
-    }
-
-    private static void safe(String name, ThrowingRunnable r) {
-        try { r.run(); }
-        catch (Throwable t) { XposedBridge.log(TAG + ": " + name + " skipped: " + t); }
     }
 
     private static void log(String where, Throwable t) {
@@ -337,45 +292,30 @@ public final class ModuleHook implements IXposedHookLoadPackage {
     }
 
     private static final class Config {
-        final boolean backEnabled;
-        final float activityScale;
-        final float taskScale;
-        final float homeScale;
-        final int durationMs;
-        final float edgeScale;
-        final boolean brightnessEnabled;
+        final boolean showBackArrow;
+        final boolean brightnessFloorEnabled;
         final float brightnessFloor;
         final boolean wakeRefresh;
 
-        Config(boolean backEnabled, float activityScale, float taskScale, float homeScale,
-               int durationMs, float edgeScale, boolean brightnessEnabled,
+        Config(boolean showBackArrow, boolean brightnessFloorEnabled,
                float brightnessFloor, boolean wakeRefresh) {
-            this.backEnabled = backEnabled;
-            this.activityScale = activityScale;
-            this.taskScale = taskScale;
-            this.homeScale = homeScale;
-            this.durationMs = durationMs;
-            this.edgeScale = edgeScale;
-            this.brightnessEnabled = brightnessEnabled;
+            this.showBackArrow = showBackArrow;
+            this.brightnessFloorEnabled = brightnessFloorEnabled;
             this.brightnessFloor = brightnessFloor;
             this.wakeRefresh = wakeRefresh;
         }
 
         static Config defaults() {
-            return new Config(true, .90f, .84f, .82f, 420, 1f, true, .10f, true);
+            // Requested default: hide the Back arrow/capsule; keep a 10% auto-brightness floor.
+            return new Config(false, true, 0.10f, true);
         }
 
-        static Config from(Bundle b) {
+        static Config from(Bundle bundle) {
             return new Config(
-                    b.getBoolean("back_enabled", true),
-                    clamp(b.getInt("activity_scale", 90) / 100f, .84f, .96f),
-                    clamp(b.getInt("task_scale", 84) / 100f, .74f, .94f),
-                    clamp(b.getInt("home_scale", 82) / 100f, .70f, .94f),
-                    (int) clamp(b.getInt("back_duration", 420), 250, 650),
-                    clamp(b.getInt("edge_scale", 100) / 100f, .80f, 1.20f),
-                    b.getBoolean("brightness_enabled", true),
-                    clamp(b.getInt("brightness_floor", 10) / 100f, .01f, .30f),
-                    b.getBoolean("wake_refresh", true));
+                    bundle.getBoolean("show_back_arrow", false),
+                    bundle.getBoolean("brightness_floor_enabled", true),
+                    clamp(bundle.getInt("brightness_floor", 10) / 100f, 0.01f, 0.30f),
+                    bundle.getBoolean("wake_refresh", true));
         }
     }
 }
