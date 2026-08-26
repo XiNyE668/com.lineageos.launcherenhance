@@ -4,7 +4,6 @@ import android.content.Context;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
-import android.os.PowerManager;
 import android.os.SystemClock;
 import android.view.Display;
 import android.view.View;
@@ -110,11 +109,9 @@ public final class ModuleHook implements IXposedHookLoadPackage {
                     Object result = param.getResult();
                     float value = result instanceof Number
                             ? ((Number) result).floatValue()
-                            : PowerManager.BRIGHTNESS_INVALID_FLOAT;
+                            : Float.NaN;
 
-                    if (Float.isNaN(value)
-                            || value == PowerManager.BRIGHTNESS_INVALID_FLOAT
-                            || value < c.brightnessFloor) {
+                    if (Float.isNaN(value) || value < c.brightnessFloor) {
                         param.setResult(Float.valueOf(c.brightnessFloor));
                     }
                 } catch (Throwable t) {
@@ -190,15 +187,12 @@ public final class ModuleHook implements IXposedHookLoadPackage {
             log("ALS disable", t);
         }
 
-        // Force the next light sample to establish a fresh ambient lux instead of keeping a stale
-        // screen-on value from the previous session.
+        // Float.NaN is Android's BRIGHTNESS_INVALID_FLOAT value; the public SDK hides the constant.
         try { XposedHelpers.setBooleanField(controller, "mAmbientLuxValid", false); }
         catch (Throwable ignored) {}
-        try { XposedHelpers.setFloatField(controller, "mScreenAutoBrightness",
-                PowerManager.BRIGHTNESS_INVALID_FLOAT); }
+        try { XposedHelpers.setFloatField(controller, "mScreenAutoBrightness", Float.NaN); }
         catch (Throwable ignored) {}
-        try { XposedHelpers.setFloatField(controller, "mRawScreenAutoBrightness",
-                PowerManager.BRIGHTNESS_INVALID_FLOAT); }
+        try { XposedHelpers.setFloatField(controller, "mRawScreenAutoBrightness", Float.NaN); }
         catch (Throwable ignored) {}
 
         try {
