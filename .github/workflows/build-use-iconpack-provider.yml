@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euxo pipefail
           APK=app/build/outputs/apk/debug/app-debug.apk
-          OUT=Launcher-Hub-use-IconPackProvider-Test.apk
+          OUT=Launcher-Hub-use-IconPackProvider-LOS23.2-Test.apk
           test -s "$APK"
           unzip -t "$APK" >/dev/null
           unzip -p "$APK" assets/xposed_init | grep -Fxq 'com.lineageos.launcherenhance.IconPackProviderHook'
@@ -62,50 +62,57 @@ jobs:
           cp "$APK" "$OUT"
           sha256sum "$OUT" | tee SHA256.txt
 
-          unzip -p "$APK" classes.dex > /tmp/classes.dex || true
-          unzip -p "$APK" classes2.dex > /tmp/classes2.dex || true
-          unzip -p "$APK" classes3.dex > /tmp/classes3.dex || true
-          cat /tmp/classes*.dex > /tmp/all.dex
+          rm -f /tmp/all.dex /tmp/classes*.dex
+          for name in classes.dex classes2.dex classes3.dex classes4.dex; do
+            unzip -p "$APK" "$name" >> /tmp/all.dex 2>/dev/null || true
+          done
           strings /tmp/all.dex | grep -q 'IconPackProviderHook'
-          strings /tmp/all.dex | grep -q 'com.android.launcher3.icons.IconProvider'
+          strings /tmp/all.dex | grep -q 'com.android.launcher3.icons.LauncherIconProviderImpl'
+          strings /tmp/all.dex | grep -q 'loadPackageIcon'
           strings /tmp/all.dex | grep -q 'getStateForApp'
           strings /tmp/all.dex | grep -q 'clearMemoryCache'
-          strings /tmp/all.dex | grep -q 'forceReload'
+          strings /tmp/all.dex | grep -q 'reloadIfActive'
           ! strings /tmp/all.dex | grep -q 'killall com.android.launcher3'
           ! strings /tmp/all.dex | grep -q 'sendSignal'
+          ! strings /tmp/all.dex | grep -q 'Process.killProcess'
 
           cat > NOTES.txt <<'EOF'
-          Launcher Hub / use.apk - IconPackProvider Port Test
+          Launcher Hub / use.apk - Launcher3Customizer provider-layer icon-pack port
 
           Baseline:
-          - source branch created from f9b37cac2e14ad16a2e591dc73dbafcfb8396340, the closest source baseline whose xposed_init matches uploaded use.apk.
-          - uploaded use.apk itself was not byte-identical to that CI artifact, so this build does not claim byte-for-byte source provenance.
+          - Keeps the Android16/LineageOS23.2 use.apk rewrite as the functional baseline.
+          - Existing Recents/desktop/customization behavior is preserved.
 
-          Icon-pack architecture:
-          - Old use.apk BubbleTextView late replacement is disabled by making its legacy IconPackLoader.getDrawable entry point a no-op.
-          - New IconPackProviderHook intercepts LOS23.2 com.android.launcher3.icons.IconProvider.getIcon(ComponentInfo,int).
-          - Replacement happens before Launcher IconCache converts the Drawable to BitmapInfo.
-          - Exact ComponentName mapping, matching Launcher3Customizer 1.0.1 behavior.
-          - Parser supports appfilter XML resource, appfilter.xml asset, and Launcher3Customizer's drawable.xml fallback.
-          - No icon pack mapping -> stock LineageOS icon result remains untouched.
+          What was learned from Launcher3Customizer 1.0.1:
+          - Its selected icon-pack setting is distributed through LauncherService/AIDL from the System Framework scope.
+          - Trebuchet performs the actual icon replacement through Launcher icon-provider/cache classes (LauncherIconProvider, CustomIconCache, IconHelper), before icons are bound to BubbleTextView.
+          - Therefore the two original scopes have different jobs: System Framework is the settings/control plane; Trebuchet is the rendering/cache plane.
+
+          Port used here:
+          - use.apk already has ConfigProvider + ContentObserver as a safe settings/control plane, so the old system_server LauncherService is deliberately NOT recreated.
+          - Actual replacement is moved from use.apk's old BubbleTextView late-draw path into LOS23.2 LauncherIconProviderImpl.loadPackageIcon(PackageItemInfo, ApplicationInfo, int).
+          - This is before IconCache creates BitmapInfo, so workspace, All Apps and folder previews consume one cached icon source.
+          - LOS23.2's native dynamic Calendar/Clock path remains untouched because IconProvider resolves those before calling loadPackageIcon.
+          - appfilter XML resource, appfilter.xml asset and drawable.xml fallback are supported.
+          - Missing mapping leaves the stock LineageOS icon unchanged.
 
           Cache/reload:
-          - Selected pack is appended to IconProvider.getStateForApp freshness id so persistent cache rows naturally become stale when the pack changes.
-          - On pack change: IconPackLoader invalidate -> IconCache.clearMemoryCache on IconCache worker handler -> LauncherModel.forceReload.
-          - No Trebuchet kill/restart, no SIGKILL, no root shell.
+          - Selected icon-pack package is appended to IconProvider.getStateForApp freshness id, naturally invalidating persistent stale icon rows.
+          - On explicit pack change: invalidate pack parser -> IconCache.clearMemoryCache -> LauncherModel.reloadIfActive.
+          - This mirrors LOS23.2 LauncherIconProviderImpl's own IconProcessorPlugin refresh pattern.
+          - No Trebuchet restart, SIGKILL, root shell, startup forceReload, LauncherModel#mApp, or obsolete DeviceProfile APIs.
 
-          Scope:
-          - The actual icon replacement lives entirely in Trebuchet/Launcher3.
-          - Original Launcher3Customizer required System Framework because its settings app used an injected LauncherService/AIDL bridge in system_server.
-          - use.apk already has an exported ConfigProvider + ContentObserver IPC path, so recreating that system_server service is unnecessary and would add boot risk.
+          LSPosed scope:
+          - Trebuchet / com.android.launcher3 only.
+          - System Framework is not required by this port because use.apk's existing ConfigProvider replaces Launcher3Customizer's system_server IPC service.
           EOF
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Launcher-Hub-use-IconPackProvider-Test
+          name: Launcher-Hub-use-IconPackProvider-LOS23.2-Test
           path: |
-            Launcher-Hub-use-IconPackProvider-Test.apk
+            Launcher-Hub-use-IconPackProvider-LOS23.2-Test.apk
             SHA256.txt
             apksigner.txt
             NOTES.txt
