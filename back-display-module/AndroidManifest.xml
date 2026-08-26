@@ -7,11 +7,11 @@
     <application
         android:allowBackup="false"
         android:directBootAware="true"
-        android:label="Back &amp; Display Tweaks"
+        android:label="Back Arrow &amp; Brightness"
         android:theme="@android:style/Theme.Material">
 
         <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="LineageOS 23.2 predictive Back animation and auto-brightness fixes" />
+        <meta-data android:name="xposeddescription" android:value="crDroid-style Back gesture arrow toggle and automatic-brightness floor for LineageOS 23.2" />
         <meta-data android:name="xposedminversion" android:value="93" />
 
         <activity
