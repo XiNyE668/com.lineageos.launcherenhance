@@ -1,0 +1,114 @@
+name: Build use icon-pack provider port
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - use-iconpack-provider-port
+    paths:
+      - 'app/**'
+      - '.github/workflows/build-use-iconpack-provider.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 36 SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Prepare deterministic test signing key
+        run: |
+          set -euxo pipefail
+          base64 -d .github/test-signing/launcherhub-test.jks.b64 > .github/test-signing/launcherhub-test.jks
+          keytool -list -keystore .github/test-signing/launcherhub-test.jks \
+            -storepass launcherhub -alias launcherhub-test >/dev/null
+
+      - name: Build APK
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Verify provider-layer port
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          OUT=Launcher-Hub-use-IconPackProvider-Test.apk
+          test -s "$APK"
+          unzip -t "$APK" >/dev/null
+          unzip -p "$APK" assets/xposed_init | grep -Fxq 'com.lineageos.launcherenhance.IconPackProviderHook'
+          unzip -p "$APK" assets/xposed_init | grep -Fxq 'com.lineageos.launcherenhance.LauncherEnhanceHook'
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" \
+            | tee apksigner.txt
+          cp "$APK" "$OUT"
+          sha256sum "$OUT" | tee SHA256.txt
+
+          # DEX-level architecture checks: provider-layer path present; dangerous restart paths absent.
+          unzip -p "$APK" classes.dex > /tmp/classes.dex || true
+          unzip -p "$APK" classes2.dex > /tmp/classes2.dex || true
+          unzip -p "$APK" classes3.dex > /tmp/classes3.dex || true
+          cat /tmp/classes*.dex > /tmp/all.dex
+          strings /tmp/all.dex | grep -q 'IconPackProviderHook'
+          strings /tmp/all.dex | grep -q 'com.android.launcher3.icons.IconProvider'
+          strings /tmp/all.dex | grep -q 'getStateForApp'
+          strings /tmp/all.dex | grep -q 'clearMemoryCache'
+          strings /tmp/all.dex | grep -q 'forceReload'
+          ! strings /tmp/all.dex | grep -q 'killall com.android.launcher3'
+          ! strings /tmp/all.dex | grep -q 'sendSignal'
+
+          cat > NOTES.txt <<'EOF'
+          Launcher Hub / use.apk - IconPackProvider Port Test
+
+          Baseline:
+          - source branch created from f9b37cac2e14ad16a2e591dc73dbafcfb8396340, the closest source baseline whose xposed_init matches uploaded use.apk.
+          - uploaded use.apk itself was not byte-identical to that CI artifact, so this build does not claim byte-for-byte source provenance.
+
+          Icon-pack architecture:
+          - Old use.apk BubbleTextView late replacement is disabled by making its legacy IconPackLoader.getDrawable entry point a no-op.
+          - New IconPackProviderHook intercepts LOS23.2 com.android.launcher3.icons.IconProvider.getIcon(ComponentInfo,int).
+          - Replacement happens before Launcher IconCache converts the Drawable to BitmapInfo.
+          - Exact ComponentName mapping, matching Launcher3Customizer 1.0.1 behavior.
+          - Parser supports appfilter XML resource, appfilter.xml asset, and Launcher3Customizer's drawable.xml fallback.
+          - No icon pack mapping -> stock LineageOS icon result remains untouched.
+
+          Cache/reload:
+          - Selected pack is appended to IconProvider.getStateForApp freshness id so persistent cache rows naturally become stale when the pack changes.
+          - On pack change: IconPackLoader invalidate -> IconCache.clearMemoryCache on IconCache worker handler -> LauncherModel.forceReload.
+          - No Trebuchet kill/restart, no SIGKILL, no root shell.
+
+          Scope:
+          - The actual icon replacement lives entirely in Trebuchet/Launcher3.
+          - Original Launcher3Customizer required System Framework because its settings app used an injected LauncherService/AIDL bridge in system_server.
+          - use.apk already has an exported ConfigProvider + ContentObserver IPC path, so recreating that system_server service is unnecessary and would add boot risk.
+          EOF
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Launcher-Hub-use-IconPackProvider-Test
+          path: |
+            Launcher-Hub-use-IconPackProvider-Test.apk
+            SHA256.txt
+            apksigner.txt
+            NOTES.txt
+          if-no-files-found: error
+          retention-days: 30
