@@ -1,10 +1,10 @@
-name: Build use icon-pack provider port
+name: Build Launcher Hub 1.0 Release
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - use-iconpack-provider-port
+      - launcherhub-1.0-release
     paths:
       - 'app/**'
       - '.github/workflows/build-use-iconpack-provider.yml'
@@ -37,28 +37,47 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Prepare deterministic test signing key
+      - name: Prepare stable signing key
         run: |
           set -euxo pipefail
           base64 -d .github/test-signing/launcherhub-test.jks.b64 > .github/test-signing/launcherhub-test.jks
           keytool -list -keystore .github/test-signing/launcherhub-test.jks \
             -storepass launcherhub -alias launcherhub-test >/dev/null
 
-      - name: Build APK
-        run: gradle --no-daemon :app:assembleDebug
+      - name: Build release APK
+        run: gradle --no-daemon :app:assembleRelease
 
-      - name: Verify native provider port
+      - name: Verify Launcher Hub 1.0
         shell: bash
         run: |
           set -euxo pipefail
-          APK=app/build/outputs/apk/debug/app-debug.apk
-          OUT=Launcher-Hub-use-IconPackProvider-LOS23.2-Test2.apk
+          APK=app/build/outputs/apk/release/app-release.apk
+          OUT=Launcher-Hub-1.0-A16-LineageOS23.2-release.apk
           test -s "$APK"
           unzip -t "$APK" >/dev/null
-          unzip -p "$APK" assets/xposed_init | grep -Fxq 'com.lineageos.launcherenhance.IconPackProviderHook'
-          unzip -p "$APK" assets/xposed_init | grep -Fxq 'com.lineageos.launcherenhance.LauncherEnhanceHook'
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" \
-            | tee apksigner.txt
+
+          # Xposed entry points must survive the release build unchanged.
+          for entry in \
+            com.lineageos.launcherenhance.IconPackProviderHook \
+            com.lineageos.launcherenhance.LauncherEnhanceHook \
+            com.lineageos.launcherenhance.RecentsMemoryHook \
+            com.lineageos.launcherenhance.RecentsActionsHook \
+            com.lineageos.launcherenhance.LauncherIntegrationHook; do
+            unzip -p "$APK" assets/xposed_init | grep -Fxq "$entry"
+          done
+
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+
+          "$AAPT" dump badging "$APK" | tee badging.txt
+          grep -q "package: name='com.lineageos.launcherenhance' versionCode='100' versionName='1.0'" badging.txt
+
+          "$AAPT" dump xmltree "$APK" AndroidManifest.xml | tee manifest-tree.txt
+          grep -q 'xposedscope' manifest-tree.txt
+          grep -q 'com.android.launcher3' manifest-tree.txt
+
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee apksigner.txt
+
           cp "$APK" "$OUT"
           sha256sum "$OUT" | tee SHA256.txt
 
@@ -66,6 +85,8 @@ jobs:
           for name in classes.dex classes2.dex classes3.dex classes4.dex; do
             unzip -p "$APK" "$name" >> /tmp/all.dex 2>/dev/null || true
           done
+
+          # Provider-layer icon-pack architecture.
           strings /tmp/all.dex | grep -q 'IconPackProviderHook'
           strings /tmp/all.dex | grep -q 'com.android.launcher3.icons.LauncherIconProviderImpl'
           strings /tmp/all.dex | grep -q 'loadPackageIcon'
@@ -73,51 +94,67 @@ jobs:
           strings /tmp/all.dex | grep -q 'clearMemoryCache'
           strings /tmp/all.dex | grep -q 'reloadIfActive'
           strings /tmp/all.dex | grep -q 'suppressed Trebuchet restart for icon-pack-only change'
+
+          # Original use.apk late paint path is present only as fail-soft fallback;
+          # the provider hook suppresses it when the provider layer is active.
           strings /tmp/all.dex | grep -q 'applyIconPack'
+
+          # Known unsafe / Android-13-only paths must not be introduced.
           ! strings /tmp/all.dex | grep -q 'killall com.android.launcher3'
           ! strings /tmp/all.dex | grep -q 'sendSignal'
+          ! strings /tmp/all.dex | grep -q 'LauncherModel;->getApp'
           ! strings /tmp/all.dex | grep -q 'forceReload'
 
           cat > NOTES.txt <<'EOF'
-          Launcher Hub / use.apk - Launcher3Customizer provider-layer icon-pack port Test2
+          Launcher Hub 1.0 - Android 16 / LineageOS 23.2
 
-          Baseline:
-          - Keeps use.apk as the functional baseline.
-          - Existing desktop, drawer, Recents, Launcher Hub settings and integration are preserved.
+          Baseline
+          - Built from use.apk's stable Launcher Hub architecture.
+          - Existing desktop, drawer, Recents Memory/ZRAM, Clear All/Screenshot and customization behavior are preserved.
 
-          Original Launcher3Customizer 1.0.1 mechanism:
-          - System Framework scope: LauncherService/AIDL distributes the selected icon-pack provider.
-          - Trebuchet scope: Launcher icon-provider/cache classes perform icon substitution before BubbleTextView binding.
-          - The old LOS-incompatible reload path referenced LauncherModel#getApp / mApp.
+          Launcher3Customizer 1.0.1 icon-pack mechanism
+          - Original System Framework scope is the control plane: LauncherService/AIDL stores and distributes iconPackProvider and notifies callbacks.
+          - Original Trebuchet scope is the rendering/cache plane: LauncherIconProvider + CustomIconCache/IconHelper resolve the icon-pack drawable before BubbleTextView binding.
+          - Original provider change clears its icon cache and refreshes LauncherModel through LauncherModel#getApp()->LauncherAppState.refreshAndReloadLauncher().
+          - That getApp/mApp path is incompatible with Android 16 / LineageOS 23.2 and is not ported.
 
-          LOS23.2 port:
-          - use.apk already has ConfigProvider + ContentObserver, so it replaces the old system_server LauncherService control plane. No duplicate System Framework service is installed.
-          - Normal icon substitution occurs in LauncherIconProviderImpl.loadPackageIcon before IconCache creates BitmapInfo.
-          - Native dynamic Calendar/Clock handling remains before this insertion point and is not replaced.
-          - appfilter resource, appfilter.xml asset and drawable.xml fallback are supported.
-          - Missing icon-pack mapping falls through to the stock LineageOS icon.
-          - When provider-layer hooking succeeds, use.apk's previous BubbleTextView late applyIconPack helper is suppressed; if provider hooking fails, that old path remains as a fail-soft fallback.
+          Launcher Hub 1.0 port
+          - use.apk's existing ConfigProvider + ContentObserver replaces the original System Framework LauncherService/AIDL control plane.
+          - Therefore no new system_server service or System Framework LSPosed hook is required.
+          - Trebuchet icon replacement is performed in LauncherIconProviderImpl.loadPackageIcon before IconCache creates BitmapInfo.
+          - Workspace, All Apps and folder previews therefore consume the same cached icon source.
+          - LineageOS dynamic Calendar/Clock handling remains untouched.
+          - Supports appfilter resource XML, assets/appfilter.xml and drawable.xml fallback.
+          - Missing mappings preserve the stock LineageOS icon.
 
-          Cache / live switching:
-          - IconProvider.getStateForApp includes the selected pack, invalidating persistent stale rows naturally.
-          - Pack change -> IconPackLoader.invalidate -> IconCache.clearMemoryCache -> LauncherModel.reloadIfActive.
-          - No startup forceReload and no LauncherModel#getApp/mApp access in the provider hook.
-          - A restart guard suppresses use.apk's generic Trebuchet self-restart when ICON_PACK is the only setting that changed. Other Launcher Hub settings retain use.apk's existing reload behavior.
-          - If Restore Defaults changes multiple settings at once, the generic use.apk reload is allowed.
+          Cache and live switching
+          - The selected pack is added to IconProvider.getStateForApp freshness state so persistent icon rows become stale when the pack changes.
+          - Icon-pack-only change: invalidate parser -> IconCache.clearMemoryCache -> LauncherModel.reloadIfActive.
+          - The generic use.apk Trebuchet restart is suppressed for icon-pack-only changes.
+          - Other Launcher Hub changes preserve use.apk's existing reload behavior.
+          - No startup forceReload, SIGKILL, root shell, LauncherModel#getApp/mApp, or obsolete DeviceProfile access is added.
 
-          LSPosed scope for this port:
-          - Trebuchet / com.android.launcher3 only.
-          - System Framework is not required because use.apk's ConfigProvider replaces Launcher3Customizer's Framework-side IPC role.
+          LSPosed
+          - Recommended scope: Trebuchet / com.android.launcher3 only.
+          - System Framework is deliberately not required in this adapted architecture.
+
+          Release
+          - package: com.lineageos.launcherenhance
+          - versionName: 1.0
+          - versionCode: 100
+          - release build is intentionally not R8-minified so all xposed_init class names remain stable.
           EOF
 
-      - name: Upload artifact
+      - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Launcher-Hub-use-IconPackProvider-LOS23.2-Test2
+          name: Launcher-Hub-1.0-A16-LineageOS23.2-release
           path: |
-            Launcher-Hub-use-IconPackProvider-LOS23.2-Test2.apk
+            Launcher-Hub-1.0-A16-LineageOS23.2-release.apk
             SHA256.txt
             apksigner.txt
+            badging.txt
+            manifest-tree.txt
             NOTES.txt
           if-no-files-found: error
           retention-days: 30
