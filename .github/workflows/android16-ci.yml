@@ -1,4 +1,4 @@
-name: Build Launcher Hub use-plus
+name: Build Launcher Hub use 1.0
 
 on:
   workflow_dispatch:
@@ -31,11 +31,14 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Patch use.apk-compatible settings UI
+      - name: Add only the two requested settings to use.apk baseline UI
         run: |
           python3 tools/patch_use_plus_ui.py
-          grep -q '壁纸随桌面滚动' app/src/main/java/com/lineageos/launcherenhance/MainActivity.java
-          grep -q '三指下滑截图' app/src/main/java/com/lineageos/launcherenhance/MainActivity.java
+          grep -q 'addSwitch("壁纸随桌面滚动", ConfigKeys.ALLOW_WALLPAPER_SCROLLING, false);' app/src/main/java/com/lineageos/launcherenhance/MainActivity.java
+          grep -q 'addSection("系统手势");' app/src/main/java/com/lineageos/launcherenhance/MainActivity.java
+          grep -q 'addSwitch("三指下滑截图", ConfigKeys.THREE_FINGER_SCREENSHOT, true);' app/src/main/java/com/lineageos/launcherenhance/MainActivity.java
+          grep -q 'showIconPackDialog' app/src/main/java/com/lineageos/launcherenhance/MainActivity.java
+          grep -q 'IconPackLoader' app/src/main/java/com/lineageos/launcherenhance/LauncherEnhanceHook.java
 
       - name: Prepare deterministic compatibility signing key
         run: |
@@ -46,14 +49,14 @@ jobs:
       - name: Build APK
         run: gradle --no-daemon :app:assembleDebug
 
-      - name: Verify installable APK and feature payload
+      - name: Verify v1.0 APK and unchanged baseline payload
         run: |
           set -euxo pipefail
           APK=app/build/outputs/apk/debug/app-debug.apk
-          OUT=Launcher-Hub-use-plus-Wallpaper-3Finger-A16.apk
+          OUT=Launcher-Hub-use-1.0.apk
           test -f "$APK"
           unzip -t "$APK" >/dev/null
-          unzip -l "$APK" | grep -q 'assets/xposed_init'
+
           INIT="$(unzip -p "$APK" assets/xposed_init)"
           echo "$INIT" | grep -q 'LauncherEnhanceHook'
           echo "$INIT" | grep -q 'RecentsMemoryHook'
@@ -62,66 +65,67 @@ jobs:
           echo "$INIT" | grep -q 'WallpaperScrollHook'
           echo "$INIT" | grep -q 'ThreeFingerScreenshotHook'
 
+          rm -f /tmp/classes*.dex /tmp/all.dex
           unzip -p "$APK" classes.dex > /tmp/classes.dex || true
           unzip -p "$APK" classes2.dex > /tmp/classes2.dex || true
           unzip -p "$APK" classes3.dex > /tmp/classes3.dex || true
           cat /tmp/classes*.dex > /tmp/all.dex
+
+          # Existing use.apk features that must remain.
+          grep -a -q 'IconPackLoader' /tmp/all.dex
+          grep -a -q 'icon_pack' /tmp/all.dex
+          grep -a -q 'RecentsMemoryHook' /tmp/all.dex
+          grep -a -q 'RecentsActionsHook' /tmp/all.dex
+          grep -a -q 'LauncherIntegrationHook' /tmp/all.dex
+
+          # Only two new capabilities.
           grep -a -q 'WallpaperOffsetInterpolator' /tmp/all.dex
           grep -a -q 'wallpaperOffsetForScroll' /tmp/all.dex
+          grep -a -q 'allow_wallpaper_scrolling' /tmp/all.dex
           grep -a -q 'PhoneWindowManager' /tmp/all.dex
           grep -a -q 'registerPointerEventListener' /tmp/all.dex
           grep -a -q 'three_finger_screenshot' /tmp/all.dex
-          grep -a -q 'allow_wallpaper_scrolling' /tmp/all.dex
 
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" \
             | tee apksigner.txt
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" \
-            | grep -qi '467aab6a668e4fd8db8f8247ab06fdbb81c108735714b53b330670c6f4fafc89'
-
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee badging.txt
-          grep -q "versionName='2.1-A16-use-plus1'" badging.txt
+          grep -q "versionName='1.0'" badging.txt
+          grep -q "versionCode='41'" badging.txt
 
           cp "$APK" "$OUT"
           sha256sum "$OUT" | tee "$OUT.sha256"
           cat > NOTES.txt <<'EOF'
-          Launcher Hub use-plus / Android 16 / LineageOS 23.2
+          Launcher Hub use 1.0 / Android 16 / LineageOS 23.2
 
           Baseline:
-          - Kept the old four-entry Launcher Hub architecture used by use.apk.
-          - No LauncherBootstrapHook and no later settings-integration rewrite imported.
+          - use.apk behavior retained, including icon-pack UI/mechanism and existing Launcher/Recents features.
+          - No removal or replacement of existing icon-pack functionality.
 
-          New feature 1 - Wallpaper scrolling:
-          - UI switch: 壁纸随桌面滚动 (default OFF).
-          - OFF short-circuits only WallpaperOffsetInterpolator.wallpaperOffsetForScroll().
-          - Uses crDroid semantics: LTR offset 0, RTL offset 1, denominator 1.
-          - Workspace page scrolling and all other Launcher animations remain stock.
-          - ON leaves the LineageOS 23.2 method completely untouched.
+          Added feature 1:
+          - 壁纸随桌面滚动
+          - Default: OFF
+          - OFF only pins WallpaperOffsetInterpolator wallpaper offset; Workspace scrolling remains stock.
+          - ON leaves LineageOS wallpaper-scroll behavior stock.
 
-          New feature 2 - Three-finger swipe down screenshot:
-          - UI switch: 三指下滑截图 (default ON).
-          - Global PointerEventListener is registered from PhoneWindowManager in system_server.
-          - Gesture geometry mirrors crDroid ThreeFingersSwipeListener: 3 pointers within 500 ms,
-            <=150dp vertical start spread, not in bottom 50dp, average downward travel >=50dp.
-          - Screenshot is requested through LineageOS PhoneWindowManager.takeScreenshot().
-          - No SystemUI hook and no all-app hook.
+          Added feature 2:
+          - 系统手势 -> 三指下滑截图
+          - Default: ON
+          - Global three-finger downward gesture is detected in System Framework and requests a normal full screenshot.
 
-          Recommended LSPosed scopes:
+          LSPosed scopes:
           - System Framework
           - Trebuchet (com.android.launcher3)
 
-          Safety:
-          - All new hook registration paths fail-soft.
-          - No APatch files, no system partition modification.
-          - Existing use.apk Launcher Hub behavior is otherwise unchanged.
+          No other feature changes are intended in this 1.0 build.
           EOF
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Launcher-Hub-use-plus-Wallpaper-3Finger-A16
+          name: Launcher-Hub-use-1.0
           path: |
-            Launcher-Hub-use-plus-Wallpaper-3Finger-A16.apk
-            Launcher-Hub-use-plus-Wallpaper-3Finger-A16.apk.sha256
+            Launcher-Hub-use-1.0.apk
+            Launcher-Hub-use-1.0.apk.sha256
             NOTES.txt
             apksigner.txt
             badging.txt
