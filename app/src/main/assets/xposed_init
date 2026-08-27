@@ -2,3 +2,5 @@ com.lineageos.launcherenhance.LauncherEnhanceHook
 com.lineageos.launcherenhance.RecentsMemoryHook
 com.lineageos.launcherenhance.RecentsActionsHook
 com.lineageos.launcherenhance.LauncherIntegrationHook
+com.lineageos.launcherenhance.WallpaperScrollHook
+com.lineageos.launcherenhance.ThreeFingerScreenshotHook
