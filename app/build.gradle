@@ -10,8 +10,8 @@ android {
         applicationId 'com.lineageos.launcherenhance'
         minSdk 30
         targetSdk 36
-        versionCode 25
-        versionName '2.0-A16-test6'
+        versionCode 100
+        versionName '1.0'
     }
 
     signingConfigs {
@@ -32,6 +32,9 @@ android {
         release {
             minifyEnabled true
             shrinkResources true
+            if (rootProject.file('.github/test-signing/launcherhub-test.jks').exists()) {
+                signingConfig signingConfigs.ciTest
+            }
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
