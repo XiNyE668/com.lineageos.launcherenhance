@@ -28,6 +28,10 @@ public final class ConfigProvider extends ContentProvider {
             b.putInt(ConfigKeys.LABEL_GAP_DELTA_DP, p.getInt(ConfigKeys.LABEL_GAP_DELTA_DP, 0));
             b.putBoolean(ConfigKeys.HIDE_QSB, p.getBoolean(ConfigKeys.HIDE_QSB, false));
             b.putBoolean(ConfigKeys.CENTER_FOLDER, p.getBoolean(ConfigKeys.CENTER_FOLDER, false));
+            b.putBoolean(ConfigKeys.ALLOW_WALLPAPER_SCROLLING,
+                    p.getBoolean(ConfigKeys.ALLOW_WALLPAPER_SCROLLING, false));
+            b.putBoolean(ConfigKeys.THREE_FINGER_SCREENSHOT,
+                    p.getBoolean(ConfigKeys.THREE_FINGER_SCREENSHOT, true));
             b.putBoolean(ConfigKeys.HIDE_DOTS, p.getBoolean(ConfigKeys.HIDE_DOTS, false));
             b.putBoolean(ConfigKeys.SHOW_BADGE_COUNT, p.getBoolean(ConfigKeys.SHOW_BADGE_COUNT, false));
             b.putInt(ConfigKeys.DOT_COLOR, p.getInt(ConfigKeys.DOT_COLOR, 0));
