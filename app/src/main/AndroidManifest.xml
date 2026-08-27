@@ -13,8 +13,9 @@
         android:theme="@android:style/Theme.Material.NoActionBar">
 
         <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="Launcher Hub: Trebuchet enhancements for Android 16 / LineageOS 23.2" />
+        <meta-data android:name="xposeddescription" android:value="Launcher Hub 1.0: LineageOS 23.2 launcher enhancements with provider-layer icon packs" />
         <meta-data android:name="xposedminversion" android:value="82" />
+        <meta-data android:name="xposedscope" android:value="com.android.launcher3" />
 
         <provider
             android:name=".ConfigProvider"
