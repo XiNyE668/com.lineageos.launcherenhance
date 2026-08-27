@@ -30,12 +30,13 @@ android {
             }
         }
         release {
-            minifyEnabled true
-            shrinkResources true
+            // The Xposed entry points are loaded by class name from assets/xposed_init.
+            // Keep release bytecode unshrunk to eliminate R8 stripping/renaming risk.
+            minifyEnabled false
+            shrinkResources false
             if (rootProject.file('.github/test-signing/launcherhub-test.jks').exists()) {
                 signingConfig signingConfigs.ciTest
             }
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 
