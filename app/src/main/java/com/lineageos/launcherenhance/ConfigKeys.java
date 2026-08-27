@@ -17,6 +17,8 @@ final class ConfigKeys {
     static final String LABEL_GAP_DELTA_DP = "label_gap_delta_dp";
     static final String HIDE_QSB = "hide_qsb";
     static final String CENTER_FOLDER = "center_folder";
+    static final String ALLOW_WALLPAPER_SCROLLING = "allow_wallpaper_scrolling";
+    static final String THREE_FINGER_SCREENSHOT = "three_finger_screenshot";
     static final String HIDE_DOTS = "hide_dots";
     static final String SHOW_BADGE_COUNT = "show_badge_count";
     static final String DOT_COLOR = "dot_color";
