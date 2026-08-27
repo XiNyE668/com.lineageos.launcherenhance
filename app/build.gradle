@@ -10,8 +10,8 @@ android {
         applicationId 'com.lineageos.launcherenhance'
         minSdk 30
         targetSdk 36
-        versionCode 40
-        versionName '2.1-A16-use-plus1'
+        versionCode 41
+        versionName '1.0'
     }
 
     signingConfigs {
