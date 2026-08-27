@@ -13,8 +13,9 @@
         android:theme="@android:style/Theme.Material.NoActionBar">
 
         <meta-data android:name="xposedmodule" android:value="true" />
-        <meta-data android:name="xposeddescription" android:value="Launcher Hub: Trebuchet enhancements for Android 16 / LineageOS 23.2" />
+        <meta-data android:name="xposeddescription" android:value="Launcher Hub: Trebuchet enhancements plus fixed wallpaper and three-finger screenshot for Android 16 / LineageOS 23.2" />
         <meta-data android:name="xposedminversion" android:value="82" />
+        <meta-data android:name="xposedscope" android:value="system;com.android.launcher3" />
 
         <provider
             android:name=".ConfigProvider"
@@ -24,6 +25,11 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:excludeFromRecents="true" />
+            android:excludeFromRecents="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>
